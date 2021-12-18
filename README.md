@@ -22,7 +22,7 @@ First You should choose the Anaconda version that suits your system and install 
     # wget https://repo.anaconda.com/archive/Anaconda3-2021.04-MacOSX-x86_64.sh
     # sh Anaconda3-2021.04-MacOSX-x86_64.sh
 
-You can install the required dependencies with the following code. If your server is located in China, we suggest using https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/pytorch/ and https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge/ as an alternative.
+You can install the required dependencies with the following code. 
 
     conda create -n GLAM
     conda activate GLAM
