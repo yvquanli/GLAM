@@ -32,7 +32,6 @@ You can install the required dependencies with the following code.
     pip install torch-scatter -f https://pytorch-geometric.com/whl/torch-${TORCH}+${CUDA}.html 
     pip install torch-sparse -f https://pytorch-geometric.com/whl/torch-${TORCH}+${CUDA}.html 
     pip install torch-geometric==1.7.2 
-    # conda remove -n GLAM --all # remove this environment if needed
     git clone https://github.com/yvquanli/GLAM.git
 
 If you don't have a gpu or want a cpu version, you can try this:
@@ -45,7 +44,6 @@ If you don't have a gpu or want a cpu version, you can try this:
     pip install torch-scatter -f https://pytorch-geometric.com/whl/torch-${TORCH}+${CUDA}.html 
     pip install torch-sparse -f https://pytorch-geometric.com/whl/torch-${TORCH}+${CUDA}.html 
     pip install torch-geometric==1.7.2 
-    # conda remove -n GLAM --all # remove this environment if needed
     git clone https://github.com/yvquanli/GLAM.git
 
 ## Demo
