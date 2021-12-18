@@ -1,5 +1,5 @@
 import os
-os.chdir(os.path.dirname(__file__))
+# os.chdir(os.path.dirname(__file__))
 
 print('Test for dataset.py and run.py!')
 os.system('python3 ./run.py --dataset demo --dataset_root ./demo --epoch 5 --loss bcel')
