@@ -24,7 +24,7 @@ First You should choose the Anaconda version that suits your system and install 
 
 You can install the required dependencies with the following code. 
 
-    conda create -n GLAM
+    conda create -n GLAM --yes
     conda activate GLAM
     conda install rdkit pytorch=1.9.0 cudatoolkit=11.1 -c pytorch -c conda-forge --yes
     CUDA=cu111
@@ -37,7 +37,7 @@ You can install the required dependencies with the following code.
 
 If you don't have a gpu or want a cpu version, you can try this:
     
-    conda create -n GLAM
+    conda create -n GLAM --yes
     conda activate GLAM
     conda install rdkit pytorch=1.9.0 -c pytorch -c conda-forge --yes
     CUDA=cpu
