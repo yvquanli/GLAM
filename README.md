@@ -38,7 +38,7 @@ If you don't have a gpu or want a cpu version, you can try this:
     
     conda create -n GLAM --yes
     conda activate GLAM
-    conda install rdkit pytorch=1.9.0 -c pytorch -c conda-forge --yes
+    conda install rdkit pytorch=1.9.0 cpuonly -c pytorch -c conda-forge --yes
     CUDA=cpu
     TORCH=1.9.0
     pip install torch-scatter -f https://pytorch-geometric.com/whl/torch-${TORCH}+${CUDA}.html 
