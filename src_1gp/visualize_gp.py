@@ -93,7 +93,7 @@ class Visualizer:
             smiles = data.smi[0]
             fig = self.visualize_atom_attention(smiles, weights, self.colormap)
             save_path = self.save_root / '{}_pred{:.3f}_true{:.3f}_{}.png'.format(self.vis_content, y_pred, y_true,
-                                                                                  smiles)
+                                                                                   smiles)
             self.save_fig(fig, save_path)
             # break
 
