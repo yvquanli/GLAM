@@ -136,6 +136,13 @@ optional arguments:
       --n_high_fidelity_seed n_high_fidelity_seed
                             n run for full epochs with a config
 
+If you want to perform property-slightly-affected structural perturbation with GLAM:
+
+    python3 glam.py --dataset physprop_mutate
+    
+If you want to perform property-slightly-affected structural perturbation with your model, please feed your model and physprop dataset to TrainerMolRegression and use the pasp() function.
+    
+
 # Citation
 
 paper to be accept...
