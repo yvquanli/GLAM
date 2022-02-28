@@ -1,9 +1,9 @@
 # GLAM
-Code for "GLAM: An adaptive graph learning method for automated molecular interactions and properties predictions".
+Code for "An adaptive graph learning method for automated molecular interactions and properties predictions".
 
 ## Abstract
 
-Improving drug discovery efficiency is a core and long-standing challenge in drug discovery. For this purpose, many graph learning methods have been developed to search potential drug candidates with fast speed and low cost. In fact, the pursuit of high prediction performance on a limited number of datasets has crystallized them, making them lose advantage in repurposing to new data generated in drug discovery. Here we propose a flexible method that can adapt to any dataset and make accurate predictions. The proposed method employs an adaptive pipeline to learn from a dataset and output a predictor. Without any manual intervention, the method achieves far better prediction performance on all tested datasets than traditional methods, which are based on hand-designed neural architectures and other fixed items. In addition, we found that the proposed method is more robust than traditional methods and can provide meaningful interpretability. Given the above, the proposed method can serve as a reliable method to predict molecular interactions and properties with high adaptability, performance, robustness and interpretability. This work would take a solid step forward to the purpose of aiding researchers to design better drugs with high efficiency.
+Improving drug discovery efficiency is a core and long-standing challenge in drug discovery. For this purpose, many graph learning methods have been developed to search potential drug candidates with fast speed and low cost. In fact, the pursuit of high prediction performance on a limited number of datasets has crystallized their architectures and hyperparameters, making them lose advantage in repurposing to new data generated in drug discovery. Here we propose a flexible method that can adapt to any dataset and make accurate predictions. The proposed method employs an adaptive pipeline to learn from a dataset and output a predictor. Without any manual intervention, the method achieves far better prediction performance on all tested datasets than traditional methods, which are based on hand-designed neural architectures and other fixed items. In addition, we found that the proposed method is more robust than traditional methods and can provide meaningful interpretability. Given the above, the proposed method can serve as a reliable method to predict molecular interactions and properties with high adaptability, performance, robustness and interpretability. This work would take a solid step forward to the purpose of aiding researchers to design better drugs with high efficiency.
 
 
 ## Requirements
@@ -24,9 +24,9 @@ First You should choose the Anaconda version that suits your system and install 
 
 You can install the required dependencies with the following code. 
 
-    conda create -n GLAM --yes
+    conda create -n GLAM python=3.8 rdkit -c conda-forge --yes
     conda activate GLAM
-    conda install rdkit pytorch=1.9.0 cudatoolkit=11.1 -c pytorch -c conda-forge --yes
+    conda install pytorch=1.9.0 cudatoolkit=11.1 -c pytorch -c conda-forge --yes
     CUDA=cu111
     TORCH=1.9.0
     pip install torch-scatter -f https://pytorch-geometric.com/whl/torch-${TORCH}+${CUDA}.html 
@@ -36,15 +36,17 @@ You can install the required dependencies with the following code.
 
 If you don't have a gpu or want a cpu version, you can try this:
     
-    conda create -n GLAM --yes
+    conda create -n GLAM python=3.8 rdkit -c conda-forge --yes
     conda activate GLAM
-    conda install rdkit pytorch=1.9.0 cpuonly -c pytorch -c conda-forge --yes
+    conda install pytorch=1.9.0 cpuonly -c pytorch -c conda-forge --yes
     CUDA=cpu
     TORCH=1.9.0
     pip install torch-scatter -f https://pytorch-geometric.com/whl/torch-${TORCH}+${CUDA}.html 
     pip install torch-sparse -f https://pytorch-geometric.com/whl/torch-${TORCH}+${CUDA}.html 
     pip install torch-geometric==1.7.2 
     git clone https://github.com/yvquanli/GLAM.git
+
+
 
 ## Demo
 If you have successfully completed the above steps, then you can use the following code to run a demo for a property prediction task.
@@ -117,9 +119,9 @@ Then make sure that run.py can be run and done by
 Then run glam.py by
 
     python3 glam.py [-h] [--dataset DATASET] [--n_init_configs N_INIT_CONFIGS]
-                     [--n_run_few_epoch N_RUN_FEW_EPOCH]
+                     [--n_low_fidelity_seed n_low_fidelity_seed]
                      [--n_top_blend N_TOP_BLEND]
-                     [--n_run_full_epoch N_RUN_FULL_EPOCH]
+                     [--n_high_fidelity_seed n_high_fidelity_seed]
 
 optional arguments:
 
@@ -127,11 +129,11 @@ optional arguments:
       --dataset DATASET     bindingdb_c, lit_esr1ant
       --n_init_configs N_INIT_CONFIGS
                             n initialized configurations
-      --n_run_few_epoch N_RUN_FEW_EPOCH
+      --n_low_fidelity_seed n_low_fidelity_seed
                             n run for few epochs
       --n_top_blend N_TOP_BLEND
                             auto blend n models
-      --n_run_full_epoch N_RUN_FULL_EPOCH
+      --n_high_fidelity_seed n_high_fidelity_seed
                             n run for full epochs with a config
 
 # Citation
