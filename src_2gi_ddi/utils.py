@@ -674,7 +674,7 @@ def summarize_logs(logs_dir: pathlib.PosixPath, metrics: list):
         logs_pd = pd.DataFrame(logs).sort_values(metrics[0], ascending=False)
         logs_summary = []
         for note, df in logs_pd.groupby('note'):
-            d = {'id(note)': note, 'n_GLAM': len(df), 'dataset': df['dataset'].iloc[0],
+            d = {'id(note)': note, 'n_run': len(df), 'dataset': df['dataset'].iloc[0],
                  'config': df['config'].iloc[0]}
             for m in metrics:
                 array = df[m].astype(float)
@@ -742,8 +742,8 @@ if __name__ == '__main__':
     # dataset = 'bindingdb_c'
     # results = auto_summarize_logs(dataset, ongoing=True)
     # evaluate_best_configs(results, n_configs=3)
-    # from trainer import Inferencer
-    # inf = Inferencer(dataset, n_blend=3)
+    # from trainer import GLAMHelper
+    # inf = GLAMHelper(dataset, n_blend=3)
     # inf.blend_and_inference()
 
     datasets = ['drugbank_caster']
