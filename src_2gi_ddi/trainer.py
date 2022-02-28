@@ -146,7 +146,7 @@ class Trainer():
 class TrainerMolBinaryClassificationNANBCE(Trainer):
     def __init__(self, args, model, train_dataset, valid_dataset, test_dataset=None, print_log=True):
         super(TrainerMolBinaryClassificationNANBCE, self).__init__(args, model, train_dataset, valid_dataset,
-                                                                   test_dataset, print_log)
+                                                                    test_dataset, print_log)
         self.metrics_fn = binary_metrics
 
     def train_iterations(self):
@@ -239,7 +239,7 @@ class TrainerMolMultiClassificationNANBCE(Trainer):
         return mean_loss, result
 
 
-class Inferencer():
+class GLAMHelper():
     def __init__(self, dataset: str, n_blend=3):
         self.dataset = dataset
         self.n_blend = n_blend
@@ -249,7 +249,7 @@ class Inferencer():
 
     def blend_and_inference(self, custom_dataset=None):
         self.log('Start to blend models and inference ...')
-        ids, configs = self.load_top_config()
+        ids, configs = self.select_top_config()
         outputs = []
         for id, config in zip(ids, configs):
             args = Namespace(**eval(config))
@@ -273,7 +273,7 @@ class Inferencer():
             raise ValueError('unknown dataset')
         self.log('Done!', with_time=True)
 
-    def load_top_config(self):
+    def select_top_config(self):
         logs = read_logs(self.logs_dir)
         if len(logs) < 1:
             self.log('Error: There is no log files found in {}!'.format(self.logs_dir))
@@ -287,7 +287,7 @@ class Inferencer():
         logs_pd_selected.to_csv(self.logs_dir / 'inf_ckpt_selected.csv')
         return logs_pd_selected['id'], logs_pd_selected['config']
 
-    def evaluate_top_configs(self, top_n, n_seed):
+    def high_fidelity_training(self, top_n, n_seed):
         self.log('Run configurations for more epochs to achieve better results...')
         logs_summary = auto_summarize_logs(self.dataset)
         gm = GPUManager()
@@ -298,7 +298,7 @@ class Inferencer():
             config = eval(config)
             config['epochs'] = 2  # 2000
             config['note'] = 'more_epochs_run'
-            for seed in range(n_seed):
+            for seed in [1, 12, 123]:
                 config['seed'] = seed
                 config['gpu'] = gm.wait_free_gpu(thre=0.5)
                 cmd = config2cmd(config)
