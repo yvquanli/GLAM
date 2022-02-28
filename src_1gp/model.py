@@ -4,6 +4,15 @@ from layer import _None
 from layer import GlobalPool5, GlobalLAPool
 from layer import LinearBlock, MessageBlock
 
+def model_args(args):
+    _other_args_name = ['dataset_root', 'dataset', 'split', 'seed', 'gpu', 'note', 'batch_size', 'epochs', 'loss',
+                        'optim', 'k', 'lr', 'lr_reduce_rate', 'lr_reduce_patience', 'early_stop_patience',
+                        'verbose_patience', 'split_seed', 'test']
+    model_args_dict = {}
+    for k, v in args.__dict__.items():
+        if k not in _other_args_name:
+            model_args_dict[k] = v
+    return model_args_dict
 
 class Architecture(torch.nn.Module):
     def __init__(self, mol_in_dim=15,
