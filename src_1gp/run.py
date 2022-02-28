@@ -1,9 +1,10 @@
 import argparse
 from model import Model
-from dataset import Dataset, PertubationDataset
-from utils import seed_torch, auto_dataset, model_args
+from dataset import Dataset, PertubationDataset, auto_dataset
+from utils import seed_torch
+from model import model_args
 
-#import os; os.chdir(os.path.dirname(__file__))
+# import os; os.chdir(os.path.dirname(__file__))
 
 import warnings; warnings.filterwarnings('ignore')
 parser = argparse.ArgumentParser()
@@ -14,7 +15,7 @@ parser.add_argument('--split', type=str, default='random', help='random, scaffol
 parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--split_seed', type=int, default=1234)
 parser.add_argument('--gpu', default=0, type=int, help='cuda device id')
-parser.add_argument('--note', default='None', type=str, help='you can write note here')
+parser.add_argument('--note', default='None2', type=str, help='you can write note here')
 
 parser.add_argument('--hid_dim_alpha', default=4, type=int, help='hidden size of model')
 parser.add_argument('--mol_block', type=str, default='_NNConv', help='_TripletMessage, _NNConv')
@@ -37,7 +38,7 @@ parser.add_argument('--flat_act', default='RReLU', type=str)
 parser.add_argument('--graph_res', default=1, type=int)
 
 parser.add_argument('--batch_size', default=32, type=int, help='number of batch_size')
-parser.add_argument('--epochs', default=100, type=int, help='number of epochs')
+parser.add_argument('--epochs', default=800, type=int, help='number of epochs')
 parser.add_argument('--loss', default='mse', type=str, help='ce,wce,focal,bfocal...')
 parser.add_argument('--optim', default='Adam', type=str, help='range, adam, sgd')
 parser.add_argument('--k', default=6, type=int, help='lookahead steps')  # for ranger optimization only
@@ -46,7 +47,6 @@ parser.add_argument('--lr_reduce_rate', default=0.7, type=float)
 parser.add_argument('--lr_reduce_patience', default=20, type=int)
 parser.add_argument('--early_stop_patience', default=50, type=int)
 parser.add_argument('--verbose_patience', default=500, type=int)
-parser.add_argument('--test', default=0, type=bool)
 
 args = parser.parse_args()
 seed_torch(args.seed)
