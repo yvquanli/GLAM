@@ -14,10 +14,10 @@ from torch.optim import Adam, SGD, lr_scheduler
 from ranger import Ranger
 from torch_geometric.data import DataLoader
 from model import Model
-from utils import screening_metrics, regression_metrics, binary_metrics, get_loss
+from utils import screening_metrics, regression_metrics, binary_metrics, multi_class_metrics, get_loss
 from utils import auto_metrics, read_logs, auto_dataset, model_args
-from dataset import extract_batch_data
-from utils import GPUManager, auto_summarize_logs, config2cmd, seed_torch
+from utils import GPUManager, auto_summarize_logs, config2cmd
+from dataset import extract_batch_data, Dataset
 
 torch.backends.cudnn.enabled = True
 
@@ -125,22 +125,6 @@ class Trainer():
         self.records = ckpt['records']
         self.model.load_state_dict(ckpt['model_state_dict'])
 
-    def write_datasets(self):
-        self.log('Writing datasets...')
-        dataloaders = {
-            'train': self.train_dataloader,
-            'valid': self.valid_dataloader,
-            'test': self.test_dataloader
-        }
-        save_dir = Path(self.train_dataloader.dataset.root) / 'split' / self.args.dataset
-        Path.mkdir(save_dir.parent, exist_ok=True)
-        Path.mkdir(save_dir, exist_ok=True)
-        for name, dataloader in dataloaders.items():
-            with open(save_dir / '{}.txt'.format(name), 'a+') as f:
-                for i, id_batch in enumerate(dataloader):
-                    for smi, pro, y in zip(id_batch.smi, id_batch.pro, id_batch.y):
-                        f.write('{} {} {}\n'.format(smi, pro, y))
-
     def log(self, msg=None, msgs=None, with_time=False):
         if self.print_log is False: return
         if with_time: msg = msg + ' time elapsed {:.2f} hrs ({:.1f} mins)'.format(
@@ -159,71 +143,23 @@ class Trainer():
                 print(msg)
 
 
-class TrainerRegression(Trainer):
+class TrainerMolBinaryClassificationNANBCE(Trainer):
     def __init__(self, args, model, train_dataset, valid_dataset, test_dataset=None, print_log=True):
-        super(TrainerRegression, self).__init__(args, model, train_dataset, valid_dataset, test_dataset, print_log)
-        self.metrics_fn = regression_metrics
-
-    def train_iterations(self):
-        self.model.train()
-        losses = []
-        for i, id_batch in enumerate(self.train_dataloader):
-            if id_batch.__sizeof__() <= 1: continue   # bn will raise error if there is only one GLAM
-            self.optimizer.zero_grad()
-            mol_batch, pro_batch = extract_batch_data(self.train_dataloader.dataset, id_batch)
-            mol_batch = mol_batch.to(self.device)
-            pro_batch = pro_batch.to(self.device)
-            y = id_batch.y.float().to(self.device).view(-1, 1)
-            output = self.model(mol_batch, pro_batch).view(-1, 1)
-            loss = self.criterion(output, y)
-            loss.backward()
-            self.optimizer.step()
-            losses.append(loss.item())
-            if i % self.args.verbose_patience == 0:
-                self.log('\tbatch {} training loss: {:.5f}'.format(i, loss.item()), with_time=True)
-        trn_loss = torch.tensor(losses).mean()
-        return trn_loss
-
-    @torch.no_grad()
-    def valid_iterations(self, mode='valid'):
-        self.model.eval()
-        dataloader = self.valid_dataloader if mode == 'valid' else self.test_dataloader
-        losses, labels, pred_labels = [], [], []
-        for id_batch in dataloader:
-            if id_batch.__sizeof__() <= 1: continue   # bn will raise error if there is only one GLAM
-            mol_batch, pro_batch = extract_batch_data(self.train_dataloader.dataset, id_batch)
-            mol_batch = mol_batch.to(self.device)
-            pro_batch = pro_batch.to(self.device)
-            y = id_batch.y.float().to(self.device)
-            output = self.model(mol_batch, pro_batch).view(-1)
-            loss = self.criterion(output, y)
-            losses.append(loss.cpu())
-            labels.append(y.cpu())
-            pred_labels.append(output.cpu())
-        mean_loss = torch.tensor(losses).mean()
-        if mode == 'inference': return torch.cat(labels), torch.cat(pred_labels)
-        result = self.metrics_fn(torch.cat(labels).numpy(), torch.cat(pred_labels).numpy())
-        return mean_loss, result
-
-
-class TrainerBinaryClassification(Trainer):
-    def __init__(self, args, model, train_dataset, valid_dataset, test_dataset=None, print_log=True):
-        super(TrainerBinaryClassification, self).__init__(args, model, train_dataset, valid_dataset, test_dataset,
-                                                          print_log)
+        super(TrainerMolBinaryClassificationNANBCE, self).__init__(args, model, train_dataset, valid_dataset,
+                                                                    test_dataset, print_log)
         self.metrics_fn = binary_metrics
 
     def train_iterations(self):
         self.model.train()
         losses = []
-        for i, id_batch in enumerate(self.train_dataloader):
-            if id_batch.__sizeof__() <= 1: continue   # bn will raise error if there is only one GLAM
+        for i, data in enumerate(self.train_dataloader):
+            if data.__sizeof__() <= 1: continue  # bn will raise error if there is only one GLAM
+            mol_batch1, mol_batch2 = extract_batch_data(self.train_dataloader.dataset.mol_data, data)
             self.optimizer.zero_grad()
-            mol_batch, pro_batch = extract_batch_data(self.train_dataloader.dataset, id_batch)
-            mol_batch = mol_batch.to(self.device)
-            pro_batch = pro_batch.to(self.device)
-            y = id_batch.y.to(self.device)
-            output = self.model(mol_batch, pro_batch)
-            loss = self.criterion(output, y)
+            mol_batch1, mol_batch2 = mol_batch1.to(self.device), mol_batch2.to(self.device)
+            y_score = self.model(mol_batch1, mol_batch2)
+            y_true = data.y.to(self.device)
+            loss = self.criterion(y_score.view(-1), y_true.float())
             loss.backward()
             self.optimizer.step()
             losses.append(loss.item())
@@ -236,54 +172,42 @@ class TrainerBinaryClassification(Trainer):
     def valid_iterations(self, mode='valid'):
         self.model.eval()
         dataloader = self.valid_dataloader if mode == 'valid' else self.test_dataloader
-        losses, labels, pred_scores, pred_labels = [], [], [], []
-        for id_batch in dataloader:
-            if id_batch.__sizeof__() <= 1: continue   # bn will raise error if there is only one GLAM
-            mol_batch, pro_batch = extract_batch_data(self.train_dataloader.dataset, id_batch)
-            mol_batch = mol_batch.to(self.device)
-            pro_batch = pro_batch.to(self.device)
-            y = id_batch.y.to(self.device)
-            output = self.model(mol_batch, pro_batch)
-            loss = self.criterion(output, y)
+        losses, ys_true, ys_score, = [], [], []
+        for data in dataloader:
+            if data.__sizeof__() <= 1: continue  # bn will raise error if there is only one GLAM
+            mol_batch1, mol_batch2 = extract_batch_data(self.train_dataloader.dataset.mol_data, data)
+            self.optimizer.zero_grad()
+            mol_batch1, mol_batch2 = mol_batch1.to(self.device), mol_batch2.to(self.device)
+            y_score = self.model(mol_batch1, mol_batch2)
+            y_true = data.y.to(self.device)
+            loss = self.criterion(y_score.view(-1), y_true.float())
             losses.append(loss.item())
-            output = torch.softmax(output, 1)  # for classification
-            pred_score = output[:, 1]
-            pred_label = torch.argmax(output, dim=1)
-            pred_scores.append(pred_score.cpu())
-            pred_labels.append(pred_label.cpu())
-            labels.append(y.cpu())
+            ys_score.append(torch.sigmoid(y_score).cpu())  # add sigmoid
+            ys_true.append(y_true.cpu())
         mean_loss = torch.tensor(losses).mean()
-        if mode == 'inference': return torch.cat(labels), torch.cat(pred_labels), torch.cat(pred_scores)
-        result = self.metrics_fn(torch.cat(labels).numpy(), y_score=torch.cat(pred_scores).numpy(),
-                                 y_pred=torch.cat(pred_labels).numpy())
+        ys_true, ys_score = torch.cat(ys_true, dim=0), torch.cat(ys_score, dim=0)
+        if mode == 'inference': return ys_score, ys_true
+        result = self.metrics_fn(ys_true.numpy(), ys_score.numpy())
         return mean_loss, result
 
 
-class TrainerScreening(TrainerBinaryClassification):
+class TrainerMolMultiClassificationNANBCE(Trainer):
     def __init__(self, args, model, train_dataset, valid_dataset, test_dataset=None, print_log=True):
-        super(TrainerScreening, self).__init__(args, model, train_dataset, valid_dataset, test_dataset, print_log)
-        self.metrics_fn = screening_metrics
-        if args.loss == 'wce':
-            self.criterion = torch.nn.CrossEntropyLoss(weight=train_dataset.weight.to(self.device))
-
-
-class TrainerBinary(Trainer):
-    def __init__(self, args, model, train_dataset, valid_dataset, test_dataset=None):
-        super(TrainerBinary, self).__init__(args, model, train_dataset, valid_dataset, test_dataset)
+        super(TrainerMolMultiClassificationNANBCE, self).__init__(args, model, train_dataset, valid_dataset,
+                                                                  test_dataset, print_log)
+        self.metrics_fn = multi_class_metrics
 
     def train_iterations(self):
         self.model.train()
         losses = []
-        for i, id_batch in enumerate(self.train_dataloader):
-            if id_batch.__sizeof__() <= 1: continue   # bn will raise error if there is only one GLAM
+        for i, data in enumerate(self.train_dataloader):
+            if data.__sizeof__() <= 1: continue  # bn will raise error if there is only one GLAM
+            mol_batch1, mol_batch2 = extract_batch_data(self.train_dataloader.dataset.mol_data, data)
             self.optimizer.zero_grad()
-            mol_batch, pro_batch = extract_batch_data(self.train_dataloader.dataset, id_batch)
-            mol_batch = mol_batch.to(self.device)
-            pro_batch = pro_batch.to(self.device)
-            id_batch.y = id_batch.y.float().to(self.device)
-            output = self.model(mol_batch, pro_batch).view(-1)
-            output = torch.sigmoid(output)  # for binary
-            loss = self.criterion(output, id_batch.y)  # bce loss
+            mol_batch1, mol_batch2 = mol_batch1.to(self.device), mol_batch2.to(self.device)
+            y_score = self.model(mol_batch1, mol_batch2)
+            y_true = data.y.to(self.device)
+            loss = self.criterion(y_score, y_true)
             loss.backward()
             self.optimizer.step()
             losses.append(loss.item())
@@ -296,30 +220,26 @@ class TrainerBinary(Trainer):
     def valid_iterations(self, mode='valid'):
         self.model.eval()
         dataloader = self.valid_dataloader if mode == 'valid' else self.test_dataloader
-        losses = []
-        labels = np.array([])
-        outputs = np.array([])
-        for id_batch in dataloader:
-            if id_batch.__sizeof__() <= 1: continue   # bn will raise error if there is only one GLAM
+        losses, ys_true, ys_score, = [], [], []
+        for data in dataloader:
+            if data.__sizeof__() <= 1: continue  # bn will raise error if there is only one GLAM
+            mol_batch1, mol_batch2 = extract_batch_data(self.train_dataloader.dataset.mol_data, data)
             self.optimizer.zero_grad()
-            mol_batch, pro_batch = extract_batch_data(self.train_dataloader.dataset, id_batch)
-            mol_batch = mol_batch.to(self.device)
-            pro_batch = pro_batch.to(self.device)
-            y = id_batch.y.float().to(self.device)
-            output = self.model(mol_batch, pro_batch).view(-1)
-            output = torch.sigmoid(output)  # for binary
-
-            # val metrics
-            loss = self.criterion(output, y)
+            mol_batch1, mol_batch2 = mol_batch1.to(self.device), mol_batch2.to(self.device)
+            y_score = self.model(mol_batch1, mol_batch2)
+            y_true = data.y.to(self.device)
+            loss = self.criterion(y_score, y_true)
             losses.append(loss.item())
-            labels = np.concatenate([labels, y.cpu().numpy()])
-            outputs = np.concatenate([outputs, output.cpu().numpy()])
-        mean_loss = np.array(losses).mean()
-        result = binary_metrics(labels, outputs)
+            ys_score.append(torch.log_softmax(y_score, dim=1).cpu())  # add log_softmax
+            ys_true.append(y_true.cpu())
+        mean_loss = torch.tensor(losses).mean()
+        ys_true, ys_score = torch.cat(ys_true, dim=0), torch.cat(ys_score, dim=0)
+        if mode == 'inference': return ys_score, ys_true
+        result = self.metrics_fn(ys_true.numpy(), ys_score.numpy())
         return mean_loss, result
 
 
-class Inferencer():
+class GLAMHelper():
     def __init__(self, dataset: str, n_blend=3):
         self.dataset = dataset
         self.n_blend = n_blend
@@ -329,15 +249,13 @@ class Inferencer():
 
     def blend_and_inference(self, custom_dataset=None):
         self.log('Start to blend models and inference ...')
-        ids, configs = self.load_top_config()
+        ids, configs = self.select_top_config()
         outputs = []
         for id, config in zip(ids, configs):
             args = Namespace(**eval(config))
             args.gpu = 0  # all
-            seed_torch(seed=1234)
             args, dataset, _Trainer = auto_dataset(args)
-            model = Model(dataset.mol_num_node_features, dataset.pro_num_node_features,
-                          dataset.mol_num_edge_features, dataset.pro_num_edge_features, **model_args(args))
+            model = Model(dataset.mol_num_node_features, dataset.mol_num_edge_features, **model_args(args))
             trainer = _Trainer(args, model, dataset.train, dataset.val, dataset.test, print_log=False)
             shutil.rmtree(trainer.log_save_dir)  # remove new made log directory
             if custom_dataset is not None:
@@ -349,14 +267,13 @@ class Inferencer():
             outputs.append(output)
             self.log('inference done!', with_time=True)
         self.log('blend results: ')
-        if args.dataset in ['ADRB2', 'ALDH1', 'ESR1_ago', 'ESR1_ant', 'FEN1', 'GBA', 'IDH1', 'KAT2A', 'MAPK1',
-                              'MTORC1', 'OPRK1', 'PKM2', 'PPARG', 'TP53', 'VDR']:
-            self.log(self.blend_binary_classification(outputs, metrics_fn=screening_metrics))
-        elif args.dataset in ['bindingdb_c']:
-            self.log(self.blend_binary_classification(outputs, metrics_fn=binary_metrics))
+        if args.dataset in ['drugbank_caster']:
+            self.log(self.blend_binary_classification_mt(outputs))
+        else:
+            raise ValueError('unknown dataset')
         self.log('Done!', with_time=True)
 
-    def load_top_config(self):
+    def select_top_config(self):
         logs = read_logs(self.logs_dir)
         if len(logs) < 1:
             self.log('Error: There is no log files found in {}!'.format(self.logs_dir))
@@ -365,13 +282,12 @@ class Inferencer():
         metrics = auto_metrics(self.dataset)
         n_blend = len(logs_pd) if len(logs_pd) < self.n_blend else self.n_blend
         self.log('{} checkpoints select!'.format(n_blend))
-        # logs_pd_selected = logs_pd[index].sort_values(metrics[0], ascending=False).iloc[:n_blend, :]
         logs_pd_selected = logs_pd.sort_values(metrics[0], ascending=False).iloc[:n_blend, :]
         self.log('More info about picked checkpoints can be found here: {}/inf_ckpt_selected.csv'.format(self.logs_dir))
         logs_pd_selected.to_csv(self.logs_dir / 'inf_ckpt_selected.csv')
         return logs_pd_selected['id'], logs_pd_selected['config']
 
-    def evaluate_top_configs(self, top_n, n_seed):
+    def high_fidelity_training(self, top_n, n_seed):
         self.log('Run configurations for more epochs to achieve better results...')
         logs_summary = auto_summarize_logs(self.dataset)
         gm = GPUManager()
@@ -380,30 +296,60 @@ class Inferencer():
             config = logs_summary.iloc[i, :]['config']
             self.log('Configuration {}: {} ...'.format(i + 1, config))
             config = eval(config)
-            config['epochs'] = 2000
+            config['epochs'] = 2  # 2000
             config['note'] = 'more_epochs_run'
-            for seed in range(n_seed):
+            for seed in [1, 12, 123]:
                 config['seed'] = seed
                 config['gpu'] = gm.wait_free_gpu(thre=0.5)
                 cmd = config2cmd(config)
                 p = subprocess.Popen(cmd, shell=True)
                 procs.append(p)
-                time.sleep(60)
+                time.sleep(30)
         for p in procs:
             p.wait()
         self.log('Run Complete!', with_time=True)
 
     @staticmethod
-    def blend_binary_classification(outputs: list, opt='vote', metrics_fn=binary_metrics):
-        ls, pls, ss = [], [], []
-        for _l, _pl, _s in outputs:
+    def blend_regression(outputs: list, opt='mean'):
+        ls, pls = [], []
+        for _l, _pl in outputs:
             ls.append(_l)
             pls.append(_pl)
+        blendd_l = ls[0]
+        blendd_pl = torch.stack(pls, dim=1).mean(dim=1) if opt == 'mean' else None
+        return regression_metrics(blendd_l.numpy(), y_pred=blendd_pl.numpy())
+
+    @staticmethod
+    def blend_binary_classification(outputs: list, opt='vote', metrics_fn=binary_metrics):
+        ls, pls, ss = [], [], []
+        for _l, _s in outputs:
+            ls.append(_l)
             ss.append(_s)
         blendd_l = ls[0]
-        blendd_pl = torch.stack(pls, dim=1).mode(dim=1)[0] if opt == 'vote' else None
         blendd_ss = torch.stack(ss, dim=1).mean(dim=1)
-        return metrics_fn(blendd_l.numpy(), y_score=blendd_ss.numpy(), y_pred=blendd_pl.numpy())
+        return metrics_fn(blendd_l.numpy(), y_score=blendd_ss.numpy())
+
+    @staticmethod
+    def blend_binary_classification_mt(outputs: list, opt='vote', metrics_fn=binary_metrics):
+        ls, ss = [], []
+        for _s, _l in outputs:
+            ls.append(_l)
+            ss.append(_s)
+        blendd_l = ls[0]
+        # blendd_pl = torch.stack(pls, dim=2).mode(dim=2)[0] if opt == 'vote' else None
+        blendd_ss = torch.stack(ss, dim=2).mean(dim=2)
+        return metrics_fn(blendd_l.numpy(), y_score=blendd_ss.numpy())
+
+    @staticmethod
+    def blend_multi_classification(outputs: list, opt='vote', metrics_fn=multi_class_metrics):
+        ls, ss = [], []
+        for _s, _l in outputs:
+            ls.append(_l)
+            ss.append(_s)
+        blendd_l = ls[0]
+        # blendd_pl = torch.stack(pls, dim=2).mode(dim=2)[0] if opt == 'vote' else None
+        blendd_ss = torch.stack(ss, dim=2).mean(dim=2)
+        return metrics_fn(blendd_l.numpy(), y_score=blendd_ss.numpy())
 
     def log(self, msg=None, with_time=False):
         msg = str(msg)
@@ -414,17 +360,3 @@ class Inferencer():
         with open(self.logs_dir / 'inference_log.txt', 'a+') as f:
             f.write(msg + '\n')
             print(msg)
-
-
-if __name__ == '__main__':
-    inf = Inferencer('ESR1_ant', n_blend=3)
-    inf.blend_and_inference()
-
-    datasets = ['ADRB2', 'ALDH1', 'ESR1_ago', 'ESR1_ant', 'FEN1', 'GBA', 'IDH1',
-                'KAT2A', 'MAPK1', 'MTORC1', 'OPRK1', 'PPARG', 'TP53']
-    for dataset in datasets:
-        # results = auto_summarize_logs(dataset, ongoing=True)
-        inf = Inferencer(dataset, n_blend=3)
-        inf.blend_and_inference()
-
-    # trainer = Trainer(None, None, None, None)
