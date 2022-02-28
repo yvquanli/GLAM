@@ -7,9 +7,19 @@ import pandas as pd
 import numpy as np
 import pathlib
 from torch_geometric.utils import remove_self_loops
-from sklearn import metrics
-from sklearn.metrics import roc_auc_score, accuracy_score, precision_score, recall_score, precision_recall_curve
+from sklearn.metrics import roc_auc_score, accuracy_score, precision_score, recall_score
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score, f1_score
+from sklearn import metrics
+from sklearn.metrics import precision_recall_curve
+import random
+from itertools import compress
+from collections import defaultdict
+
+try:
+    from rdkit.Chem.Scaffolds import MurckoScaffold
+except:
+    MurckoScaffold = None
+    print('Please install rdkit for data processing')
 
 pd.set_option('display.max_rows', 100)
 pd.set_option('display.max_columns', 100)
@@ -72,6 +82,25 @@ class FocalLoss(torch.nn.Module):
         return focal_loss
 
 
+class MultiTargetCrossEntropy(torch.nn.Module):
+    def __init__(self, C_dim=2):
+        super(MultiTargetCrossEntropy, self).__init__()
+        self.log_softmax = torch.nn.LogSoftmax(dim=C_dim)
+        self.nll_loss = torch.nn.NLLLoss()
+
+    def forward(self, input, target):
+        # input = input.view(target.shape[0], self.C, target.shape[1])
+        '''
+            input: shoud be `(N, T, C)` where `C = number of classes` and `T = number of targets`
+            target: should be `(N, T)` where `T = number of targets`
+        '''
+        assert input.shape[0] == target.shape[0]
+        assert input.shape[1] == target.shape[1]
+        out = self.log_softmax(input)
+        out = self.nll_loss(out, target)
+        return out
+
+
 def get_loss(loss_str):
     d = {
         'mse': torch.nn.MSELoss(),
@@ -79,19 +108,19 @@ def get_loss(loss_str):
         'huber': torch.nn.SmoothL1Loss(),
         'smae': torch.nn.SmoothL1Loss(),
         'bce': torch.nn.BCELoss(),
+        'bcen': torch.nn.BCELoss(reduction="none"),
         'bcel': torch.nn.BCEWithLogitsLoss(),
+        'bceln': torch.nn.BCEWithLogitsLoss(reduction="none"),
+        'mtce': MultiTargetCrossEntropy(),
         'kl': torch.nn.KLDivLoss(),
         'hinge': torch.nn.HingeEmbeddingLoss(),
         'nll': torch.nn.NLLLoss(),
         'ce': torch.nn.CrossEntropyLoss(),
         'focal': FocalLoss(alpha=0.25),
     }
-    loss_will_set_in_trainer = ['wce']
     if loss_str not in d.keys():
-        if loss_str in loss_will_set_in_trainer: return None
-        raise ValueError('Error loss: {}!'.format(loss_str))
-    else:
-        return d[loss_str]
+        raise ValueError('loss not found')
+    return d[loss_str]
 
 
 def binary_metrics(y_true, y_score, y_pred=None, threshod=0.5):
@@ -103,6 +132,46 @@ def binary_metrics(y_true, y_score, y_pred=None, threshod=0.5):
     recall = recall_score(y_true, y_pred, average='macro')
     f1 = f1_score(y_true, y_pred, average='macro')
     d = {'auc': auc, 'prauc': prauc, 'acc': acc, 'precision': precision, 'recall': recall, 'f1': f1}
+    return d
+
+
+def multi_class_metrics(y_true, y_score, y_pred=None):
+    '''
+       y_score should be `(N, T)` where N = number of GLAMs, and T = number of targets
+       y_true should be `(N)` where N = number of GLAMs, and value should be in [0, n_class)
+       y_pred should be `(N)` where N = number of GLAMs, and value should be in [0, n_class)
+    '''
+    if y_pred is None: y_pred = np.argmax(y_score, axis=1).astype(int)
+    acc = accuracy_score(y_true, y_pred)
+    precision = precision_score(y_true, y_pred, average='macro')
+    recall = recall_score(y_true, y_pred, average='macro')
+    f1 = f1_score(y_true, y_pred, average='macro')
+    d = {'acc': acc, 'precision': precision, 'recall': recall, 'f1': f1}
+    return d
+
+
+def binary_metrics_multi_target_nan(y_true, y_score, y_pred=None, nan_fill=-1, threshod=0.5):
+    '''
+       y_true and y_score should be `(N, T)` where N = number of GLAMs, and T = number of targets
+    '''
+    if y_pred is None: y_pred = (y_score >= threshod).astype(int)
+    roc_list, acc_list, prc_list, rec_list = [], [], [], []
+    for i in range(y_true.shape[1]):
+        if (y_true[:, i] == 1).sum() == 0 or (y_true[:, i] == 0).sum() == 0:
+            print('Skipped target, cause AUC is only defined when there is at least one positive data.')
+            continue
+
+        if nan_fill == -1:
+            is_valid = y_true[:, i] >= 0
+            y_true_st = y_true[is_valid, i]
+            y_score_st = y_score[is_valid, i]
+            y_pred_st = y_pred[is_valid, i]
+            roc_list.append(roc_auc_score(y_true_st, y_score_st))
+            acc_list.append(accuracy_score(y_true_st, y_pred_st))
+            prc_list.append(precision_score(y_true_st, y_pred_st))
+            rec_list.append(recall_score(y_true_st, y_pred_st))
+    d = {'auc': sum(roc_list) / len(roc_list), 'acc': sum(acc_list) / len(acc_list),
+         'precision': sum(prc_list) / len(prc_list), 'recall': sum(rec_list) / len(rec_list)}
     return d
 
 
@@ -194,6 +263,83 @@ def screening_metrics(y_true, y_score, y_pred=None, threshod=0.5):
     return d
 
 
+def generate_scaffold(smiles, include_chirality=False):
+    """
+    Obtain Bemis-Murcko scaffold from smiles
+    :param smiles:
+    :param include_chirality:
+    :return: smiles of scaffold
+    """
+    scaffold = MurckoScaffold.MurckoScaffoldSmiles(
+        smiles=smiles, includeChirality=include_chirality)
+    return scaffold
+
+
+def random_scaffold_split(dataset, smiles_list, task_idx=None, null_value=0,
+                          frac_train=0.8, frac_valid=0.1, frac_test=0.1, seed=0):
+    """
+    Adapted from https://github.com/pfnet-research/chainer-chemistry/blob/master/chainer_chemistry/dataset/splitters/scaffold_splitter.py
+    Split dataset by Bemis-Murcko scaffolds
+    This function can also ignore examples containing null values for a
+    selected task when splitting. Deterministic split
+    :param dataset: pytorch geometric dataset obj
+    :param smiles_list: list of smiles corresponding to the dataset obj
+    :param task_idx: column idx of the data.y tensor. Will filter out
+    examples with null value in specified task column of the data.y tensor
+    prior to splitting. If None, then no filtering
+    :param null_value: float that specifies null value in data.y to filter if
+    task_idx is provided
+    :param frac_train:
+    :param frac_valid:
+    :param frac_test:
+    :param seed;
+    :return: train, valid, test slices of the input dataset obj
+    """
+
+    np.testing.assert_almost_equal(frac_train + frac_valid + frac_test, 1.0)
+
+    if task_idx != None:
+        # filter based on null values in task_idx
+        # get task array
+        y_task = np.array([data.y[:, task_idx].item() for data in dataset])
+        # boolean array that correspond to non null values
+        non_null = y_task != null_value
+        smiles_list = list(compress(enumerate(smiles_list), non_null))
+    else:
+        non_null = np.ones(len(dataset)) == 1
+        smiles_list = list(compress(enumerate(smiles_list), non_null))
+
+    rng = np.random.RandomState(seed)
+
+    scaffolds = defaultdict(list)
+    for ind, smiles in smiles_list:
+        scaffold = generate_scaffold(smiles, include_chirality=True)
+        scaffolds[scaffold].append(ind)
+
+    scaffold_sets = rng.permutation(list(scaffolds.values()))
+
+    n_total_valid = int(np.floor(frac_valid * len(dataset)))
+    n_total_test = int(np.floor(frac_test * len(dataset)))
+
+    train_idx = []
+    valid_idx = []
+    test_idx = []
+
+    for scaffold_set in scaffold_sets:
+        if len(valid_idx) + len(scaffold_set) <= n_total_valid:
+            valid_idx.extend(scaffold_set)
+        elif len(test_idx) + len(scaffold_set) <= n_total_test:
+            test_idx.extend(scaffold_set)
+        else:
+            train_idx.extend(scaffold_set)
+
+    train_dataset = dataset[torch.tensor(train_idx)]
+    valid_dataset = dataset[torch.tensor(valid_idx)]
+    test_dataset = dataset[torch.tensor(test_idx)]
+
+    return train_dataset, valid_dataset, test_dataset
+
+
 def angle(vector1, vector2):
     cos_angle = vector1.dot(vector2) / (np.linalg.norm(vector1) * np.linalg.norm(vector2))
     angle = np.arccos(cos_angle)
@@ -219,118 +365,6 @@ def cal_dist(vertex1, vertex2, ord=2):
     return np.linalg.norm(vertex1 - vertex2, ord=ord)
 
 
-'''
-    Usages: 
-    vij=np.array([ 0, 1,  1])
-    vik=np.array([ 0, 2,  0])
-    cal_angle_area(vij, vik)   # (0.7853981633974484, 1.0)
-    vertex1 = np.array([1,2,3])
-    vertex2 = np.array([4,5,6])
-    cal_dist(vertex1, vertex2, ord=1), np.sum(vertex1-vertex2) # (9.0, -9)
-    cal_dist(vertex1, vertex2, ord=2), np.sqrt(np.sum(np.square(vertex1-vertex2)))  # (5.19, 5.19)
-    cal_dist(vertex1, vertex2, ord=3)  # 4.3267487109222245
-'''
-
-
-def read_probs(path, mean_prob=False):
-    # fh = open(filename, 'r')
-    # content = [line.strip() for line in list(fh)]
-    # fh.close()
-    # print(content)
-    with open(path, 'r') as f:
-        content = f.readlines()
-
-    assert len(content) >= 5  # '1. the input file contains fewer than 5 lines'
-
-    seq = ""
-    infos = {}
-    probs = []
-
-    for line in content:
-        # print(line)
-        if 'SEQ' in line:
-            seq += line.split()[-1]
-            continue
-        if line.startswith('PFRMAT') or line.startswith('TARGET') or line.startswith('AUTHOR') or \
-                line.startswith('METHOD') or line.startswith('RMODE') or line.startswith('RMODE') or \
-                line.startswith('MODEL') or line.startswith('REMARK') or line.startswith('END'):
-            infos[line.split()[0]] = line.split()[1:]
-            continue
-
-        columns = line.split()
-
-        if len(columns) >= 3:
-            indices = [int(x) for x in columns[0:2]]
-            prob = np.float32(columns[2])
-            # if mean_prob:
-            #     prob = np.mean([float(x) for x in columns[-10:-1:2]])  # todo: need to check when using
-
-            assert 0 <= prob <= 1  # 'The contact prob shall be between 0 and 1: '
-            # assert 0 < c < 20  # 'The distance shall be between 0 and 20: '
-            assert indices[0] < indices[1]  # 'The first index in a residue pair shall be smaller than the 2nd one:'
-
-            if indices[0] < 1 or indices[0] > len(seq) or indices[1] < 1 or indices[1] > len(seq):
-                print('The residue index in the following line is out of range: \n', line)
-                return None
-            probs.append(indices + [prob])
-        else:
-            print('The following line in the input file has an incorrect format: ')
-            print(line)
-            return None
-    return probs, seq, infos
-
-
-def load_contactmap(path, thre=0.1):
-    # 0.1  thre to keep 2988/30000 prob data of a 894 AAs protein
-    # 0.05 thre to keep 4700/30000 prob data
-    # 0.3  thre to keep 1505/30000 prob data
-    probs, seq, infos = read_probs(path)
-    contactmap = np.zeros((len(seq), len(seq)), dtype=np.float32)
-    for p in probs:
-        if p[2] >= thre:
-            contactmap[p[0] - 1, p[1] - 1] = p[2]
-            contactmap[p[1] - 1, p[0] - 1] = p[2]
-    return contactmap, seq, infos
-
-
-# nomarlize
-def dic_normalize(dic):
-    # print(dic)
-    keys = list(dic.keys())
-    values = np.array(list(dic.values()))
-    values = (values - values.mean()) / values.std()  # norm
-    new_dic = {}
-    for i, key in enumerate(keys):
-        new_dic[key] = values[i].tolist()
-    return new_dic
-
-
-def dic_normalize_2d(dic):
-    # print(dic)
-    keys = list(dic.keys())
-    values = np.array(list(dic.values()))
-    mean = values.mean(axis=0)
-    std = values.std(axis=0)
-    values = (values - mean) / std  # norm
-    new_dic = {}
-    for i, key in enumerate(keys):
-        new_dic[key] = values[i, :].tolist()
-    return new_dic
-
-
-# nomarlize
-def dic_normalize_min_max(dic):
-    # print(dic)
-    max_value = dic[max(dic, key=dic.get)]
-    min_value = dic[min(dic, key=dic.get)]
-    # print(max_value)
-    interval = float(max_value) - float(min_value)
-    for key in dic.keys():
-        dic[key] = (dic[key] - min_value) / interval
-    dic['X'] = (max_value + min_value) / 2.0
-    return dic
-
-
 # one ont encoding
 def one_of_k_encoding(x, allowable_set):
     if x not in allowable_set:
@@ -346,123 +380,178 @@ def one_of_k_encoding_unk(x, allowable_set):
     return list(map(lambda s: x == s, allowable_set))
 
 
-res_type_table = ['A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'W', 'Y', ]
-# 'X' for unkown?
-res_aliphatic_table = ['A', 'I', 'L', 'M', 'V']
-res_aromatic_table = ['F', 'W', 'Y']
-
-res_non_polar_table = ['A', 'G', 'P', 'V', 'L', 'I', 'M']
-res_polar_neutral_table = ['C', 'N', 'Q', 'S', 'T']
-res_acidic_charged_table = ['D', 'E']  # res_polar_negatively_table = ['D', 'E']
-res_basic_charged_table = ['H', 'K', 'R']  # res_polar_positively_table = ['R', 'K', 'H']
-
-res_weight_table = {'A': 71.08, 'C': 103.15, 'D': 115.09, 'E': 129.12, 'F': 147.18, 'G': 57.05, 'H': 137.14,
-                    'I': 113.16, 'K': 128.18, 'L': 113.16, 'M': 131.20, 'N': 114.11, 'P': 97.12, 'Q': 128.13,
-                    'R': 156.19, 'S': 87.08, 'T': 101.11, 'V': 99.13, 'W': 186.22, 'Y': 163.18}
-res_pka_table = {'A': 2.34, 'C': 1.96, 'D': 1.88, 'E': 2.19, 'F': 1.83, 'G': 2.34, 'H': 1.82, 'I': 2.36,
-                 'K': 2.18, 'L': 2.36, 'M': 2.28, 'N': 2.02, 'P': 1.99, 'Q': 2.17, 'R': 2.17, 'S': 2.21,
-                 'T': 2.09, 'V': 2.32, 'W': 2.83, 'Y': 2.32}
-res_pkb_table = {'A': 9.69, 'C': 10.28, 'D': 9.60, 'E': 9.67, 'F': 9.13, 'G': 9.60, 'H': 9.17,
-                 'I': 9.60, 'K': 8.95, 'L': 9.60, 'M': 9.21, 'N': 8.80, 'P': 10.60, 'Q': 9.13,
-                 'R': 9.04, 'S': 9.15, 'T': 9.10, 'V': 9.62, 'W': 9.39, 'Y': 9.62}
-res_pkx_table = {'A': 0.00, 'C': 8.18, 'D': 3.65, 'E': 4.25, 'F': 0.00, 'G': 0, 'H': 6.00,
-                 'I': 0.00, 'K': 10.53, 'L': 0.00, 'M': 0.00, 'N': 0.00, 'P': 0.00, 'Q': 0.00,
-                 'R': 12.48, 'S': 0.00, 'T': 0.00, 'V': 0.00, 'W': 0.00, 'Y': 0.00}
-res_pl_table = {'A': 6.00, 'C': 5.07, 'D': 2.77, 'E': 3.22, 'F': 5.48, 'G': 5.97, 'H': 7.59,
-                'I': 6.02, 'K': 9.74, 'L': 5.98, 'M': 5.74, 'N': 5.41, 'P': 6.30, 'Q': 5.65,
-                'R': 10.76, 'S': 5.68, 'T': 5.60, 'V': 5.96, 'W': 5.89, 'Y': 5.96}
-res_hydrophobic_ph2_table = {'A': 47, 'C': 52, 'D': -18, 'E': 8, 'F': 92, 'G': 0, 'H': -42, 'I': 100,
-                             'K': -37, 'L': 100, 'M': 74, 'N': -41, 'P': -46, 'Q': -18, 'R': -26, 'S': -7,
-                             'T': 13, 'V': 79, 'W': 84, 'Y': 49}
-res_hydrophobic_ph7_table = {'A': 41, 'C': 49, 'D': -55, 'E': -31, 'F': 100, 'G': 0, 'H': 8, 'I': 99,
-                             'K': -23, 'L': 97, 'M': 74, 'N': -28, 'P': -46, 'Q': -10, 'R': -14, 'S': -5,
-                             'T': 13, 'V': 76, 'W': 97, 'Y': 63}
-meiler_feature_table = {
-    'A': [1.28, 0.05, 1.00, 0.31, 6.11, 0.42, 0.23],
-    'C': [1.77, 0.13, 2.43, 1.54, 6.35, 0.17, 0.41],
-    'D': [1.60, 0.11, 2.78, -0.77, 2.95, 0.25, 0.20],
-    'E': [1.56, 0.15, 3.78, -0.64, 3.09, 0.42, 0.21],
-    'F': [2.94, 0.29, 5.89, 1.79, 5.67, 0.30, 0.38],
-    'G': [0.00, 0.00, 0.00, 0.00, 6.07, 0.13, 0.15],
-    'H': [2.99, 0.23, 4.66, 0.13, 7.69, 0.27, 0.30],
-    'I': [4.19, 0.19, 4.00, 1.80, 6.04, 0.30, 0.45],
-    'K': [1.89, 0.22, 4.77, -0.99, 9.99, 0.32, 0.27],
-    'L': [2.59, 0.19, 4.00, 1.70, 6.04, 0.39, 0.31],
-    'M': [2.35, 0.22, 4.43, 1.23, 5.71, 0.38, 0.32],
-    'N': [1.60, 0.13, 2.95, -0.60, 6.52, 0.21, 0.22],
-    'P': [2.67, 0.00, 2.72, 0.72, 6.80, 0.13, 0.34],
-    'Q': [1.56, 0.18, 3.95, -0.22, 5.65, 0.36, 0.25],
-    'R': [2.34, 0.29, 6.13, -1.01, 10.74, 0.36, 0.25],
-    'S': [1.31, 0.06, 1.60, -0.04, 5.70, 0.20, 0.28],
-    'T': [3.03, 0.11, 2.60, 0.26, 5.60, 0.21, 0.36],
-    'V': [3.67, 0.14, 3.00, 1.22, 6.02, 0.27, 0.49],
-    'W': [3.21, 0.41, 8.08, 2.25, 5.94, 0.32, 0.42],
-    'Y': [2.94, 0.30, 6.47, 0.96, 5.66, 0.25, 0.41],
-    # 'PTR': [2.94, 0.30, 6.47, 0.96, 5.66, 0.25, 0.41],
-    # 'TPO': [3.03, 0.11, 2.60, 0.26, 5.60, 0.21, 0.36],
-    # 'SEP': [1.31, 0.06, 1.60, -0.04, 5.70, 0.20, 0.28],
-    # 'KCX': [1.89, 0.22, 4.77, -0.99, 9.99, 0.32, 0.27],
-    # 'LLP': [1.89, 0.22, 4.77, -0.99, 9.99, 0.32, 0.27],
-    # 'PCA': [1.56, 0.15, 3.78, -0.64, 3.09, 0.42, 0.21],
-    # 'MSE': [2.35, 0.22, 4.43, 1.23, 5.71, 0.38, 0.32],
-    # 'CSO': [1.77, 0.13, 2.43, 1.54, 6.35, 0.17, 0.41],
-    # 'CAS': [1.77, 0.13, 2.43, 1.54, 6.35, 0.17, 0.41],
-    # 'CAF': [1.77, 0.13, 2.43, 1.54, 6.35, 0.17, 0.41],
-    # 'CSD': [1.77, 0.13, 2.43, 1.54, 6.35, 0.17, 0.41],
-    # 'UNKNOWN': [0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00]
-}
-kidera_feature_table = {
-    'A': [-1.56, -1.67, -0.97, -0.27, -0.93, -0.78, -0.2, -0.08, 0.21, -0.48],
-    'C': [0.12, -0.89, 0.45, -1.05, -0.71, 2.41, 1.52, -0.69, 1.13, 1.1],
-    'E': [-1.45, 0.19, -1.61, 1.17, -1.31, 0.4, 0.04, 0.38, -0.35, -0.12],
-    'D': [0.58, -0.22, -1.58, 0.81, -0.92, 0.15, -1.52, 0.47, 0.76, 0.7],
-    'G': [1.46, -1.96, -0.23, -0.16, 0.1, -0.11, 1.32, 2.36, -1.66, 0.46],
-    'F': [-0.21, 0.98, -0.36, -1.43, 0.22, -0.81, 0.67, 1.1, 1.71, -0.44],
-    'I': [-0.73, -0.16, 1.79, -0.77, -0.54, 0.03, -0.83, 0.51, 0.66, -1.78],
-    'H': [-0.41, 0.52, -0.28, 0.28, 1.61, 1.01, -1.85, 0.47, 1.13, 1.63],
-    'K': [-0.34, 0.82, -0.23, 1.7, 1.54, -1.62, 1.15, -0.08, -0.48, 0.6],
-    'M': [-1.4, 0.18, -0.42, -0.73, 2.0, 1.52, 0.26, 0.11, -1.27, 0.27],
-    'L': [-1.04, 0.0, -0.24, -1.1, -0.55, -2.05, 0.96, -0.76, 0.45, 0.93],
-    'N': [1.14, -0.07, -0.12, 0.81, 0.18, 0.37, -0.09, 1.23, 1.1, -1.73],
-    'Q': [-0.47, 0.24, 0.07, 1.1, 1.1, 0.59, 0.84, -0.71, -0.03, -2.33],
-    'P': [2.06, -0.33, -1.15, -0.75, 0.88, -0.45, 0.3, -2.3, 0.74, -0.28],
-    'S': [0.81, -1.08, 0.16, 0.42, -0.21, -0.43, -1.89, -1.15, -0.97, -0.23],
-    'R': [0.22, 1.27, 1.37, 1.87, -1.7, 0.46, 0.92, -0.39, 0.23, 0.93],
-    'T': [0.26, -0.7, 1.21, 0.63, -0.1, 0.21, 0.24, -1.15, -0.56, 0.19],
-    'W': [0.3, 2.1, -0.72, -1.57, -1.16, 0.57, -0.48, -0.4, -2.3, -0.6],
-    'V': [-0.74, -0.71, 2.04, -0.4, 0.5, -0.81, -1.07, 0.06, -0.46, 0.65],
-    'Y': [1.38, 1.48, 0.8, -0.56, -0.0, -0.68, -0.31, 1.03, -0.05, 0.53],
-    # 'UNKNOWN': [0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00]
-}
-
-
-# res_weight_table = dic_normalize(res_weight_table)  # min-max norm???
-# res_pka_table = dic_normalize(res_pka_table)
-# res_pkb_table = dic_normalize(res_pkb_table)
-# res_pkx_table = dic_normalize(res_pkx_table)
-# res_pl_table = dic_normalize(res_pl_table)
-# res_hydrophobic_ph2_table = dic_normalize(res_hydrophobic_ph2_table)
-# res_hydrophobic_ph7_table = dic_normalize(res_hydrophobic_ph7_table)
-# meiler_feature_table = dic_normalize_2d(meiler_feature_table)
-# kidera_feature_table = dic_normalize_2d(kidera_feature_table)  # kidera_feature had been normed
-
-def get_residue_features(residue):
-    res_type = one_of_k_encoding(residue, res_type_table)
-    res_type = [int(x) for x in res_type]
-    res_property1 = [1 if residue in res_aliphatic_table else 0, 1 if residue in res_aromatic_table else 0,
-                     1 if residue in res_polar_neutral_table else 0, 1 if residue in res_acidic_charged_table else 0,
-                     1 if residue in res_basic_charged_table else 0, ]
-    res_property2 = [res_weight_table[residue], res_pka_table[residue],
-                     res_pkb_table[residue], res_pkx_table[residue],
-                     res_pl_table[residue], res_hydrophobic_ph2_table[residue],
-                     res_hydrophobic_ph7_table[residue], ]
-    res_property3 = meiler_feature_table[residue] + kidera_feature_table[residue]
-    return res_type + res_property1 + res_property2 + res_property3
+toxcast_tasks = ['ACEA_T47D_80hr_Negative', 'ACEA_T47D_80hr_Positive', 'APR_HepG2_CellCycleArrest_24h_dn',
+                 'APR_HepG2_CellCycleArrest_24h_up', 'APR_HepG2_CellCycleArrest_72h_dn',
+                 'APR_HepG2_CellLoss_24h_dn', 'APR_HepG2_CellLoss_72h_dn', 'APR_HepG2_MicrotubuleCSK_24h_dn',
+                 'APR_HepG2_MicrotubuleCSK_24h_up', 'APR_HepG2_MicrotubuleCSK_72h_dn',
+                 'APR_HepG2_MicrotubuleCSK_72h_up', 'APR_HepG2_MitoMass_24h_dn', 'APR_HepG2_MitoMass_24h_up',
+                 'APR_HepG2_MitoMass_72h_dn', 'APR_HepG2_MitoMass_72h_up', 'APR_HepG2_MitoMembPot_1h_dn',
+                 'APR_HepG2_MitoMembPot_24h_dn', 'APR_HepG2_MitoMembPot_72h_dn', 'APR_HepG2_MitoticArrest_24h_up',
+                 'APR_HepG2_MitoticArrest_72h_up', 'APR_HepG2_NuclearSize_24h_dn', 'APR_HepG2_NuclearSize_72h_dn',
+                 'APR_HepG2_NuclearSize_72h_up', 'APR_HepG2_OxidativeStress_24h_up',
+                 'APR_HepG2_OxidativeStress_72h_up', 'APR_HepG2_StressKinase_1h_up',
+                 'APR_HepG2_StressKinase_24h_up', 'APR_HepG2_StressKinase_72h_up', 'APR_HepG2_p53Act_24h_up',
+                 'APR_HepG2_p53Act_72h_up', 'APR_Hepat_Apoptosis_24hr_up', 'APR_Hepat_Apoptosis_48hr_up',
+                 'APR_Hepat_CellLoss_24hr_dn', 'APR_Hepat_CellLoss_48hr_dn', 'APR_Hepat_DNADamage_24hr_up',
+                 'APR_Hepat_DNADamage_48hr_up', 'APR_Hepat_DNATexture_24hr_up', 'APR_Hepat_DNATexture_48hr_up',
+                 'APR_Hepat_MitoFxnI_1hr_dn', 'APR_Hepat_MitoFxnI_24hr_dn', 'APR_Hepat_MitoFxnI_48hr_dn',
+                 'APR_Hepat_NuclearSize_24hr_dn', 'APR_Hepat_NuclearSize_48hr_dn', 'APR_Hepat_Steatosis_24hr_up',
+                 'APR_Hepat_Steatosis_48hr_up', 'ATG_AP_1_CIS_dn', 'ATG_AP_1_CIS_up', 'ATG_AP_2_CIS_dn',
+                 'ATG_AP_2_CIS_up', 'ATG_AR_TRANS_dn', 'ATG_AR_TRANS_up', 'ATG_Ahr_CIS_dn', 'ATG_Ahr_CIS_up',
+                 'ATG_BRE_CIS_dn', 'ATG_BRE_CIS_up', 'ATG_CAR_TRANS_dn', 'ATG_CAR_TRANS_up', 'ATG_CMV_CIS_dn',
+                 'ATG_CMV_CIS_up', 'ATG_CRE_CIS_dn', 'ATG_CRE_CIS_up', 'ATG_C_EBP_CIS_dn', 'ATG_C_EBP_CIS_up',
+                 'ATG_DR4_LXR_CIS_dn', 'ATG_DR4_LXR_CIS_up', 'ATG_DR5_CIS_dn', 'ATG_DR5_CIS_up', 'ATG_E2F_CIS_dn',
+                 'ATG_E2F_CIS_up', 'ATG_EGR_CIS_up', 'ATG_ERE_CIS_dn', 'ATG_ERE_CIS_up', 'ATG_ERRa_TRANS_dn',
+                 'ATG_ERRg_TRANS_dn', 'ATG_ERRg_TRANS_up', 'ATG_ERa_TRANS_up', 'ATG_E_Box_CIS_dn',
+                 'ATG_E_Box_CIS_up', 'ATG_Ets_CIS_dn', 'ATG_Ets_CIS_up', 'ATG_FXR_TRANS_up', 'ATG_FoxA2_CIS_dn',
+                 'ATG_FoxA2_CIS_up', 'ATG_FoxO_CIS_dn', 'ATG_FoxO_CIS_up', 'ATG_GAL4_TRANS_dn', 'ATG_GATA_CIS_dn',
+                 'ATG_GATA_CIS_up', 'ATG_GLI_CIS_dn', 'ATG_GLI_CIS_up', 'ATG_GRE_CIS_dn', 'ATG_GRE_CIS_up',
+                 'ATG_GR_TRANS_dn', 'ATG_GR_TRANS_up', 'ATG_HIF1a_CIS_dn', 'ATG_HIF1a_CIS_up',
+                 'ATG_HNF4a_TRANS_dn', 'ATG_HNF4a_TRANS_up', 'ATG_HNF6_CIS_dn', 'ATG_HNF6_CIS_up',
+                 'ATG_HSE_CIS_dn', 'ATG_HSE_CIS_up', 'ATG_IR1_CIS_dn', 'ATG_IR1_CIS_up', 'ATG_ISRE_CIS_dn',
+                 'ATG_ISRE_CIS_up', 'ATG_LXRa_TRANS_dn', 'ATG_LXRa_TRANS_up', 'ATG_LXRb_TRANS_dn',
+                 'ATG_LXRb_TRANS_up', 'ATG_MRE_CIS_up', 'ATG_M_06_TRANS_up', 'ATG_M_19_CIS_dn',
+                 'ATG_M_19_TRANS_dn', 'ATG_M_19_TRANS_up', 'ATG_M_32_CIS_dn', 'ATG_M_32_CIS_up',
+                 'ATG_M_32_TRANS_dn', 'ATG_M_32_TRANS_up', 'ATG_M_61_TRANS_up', 'ATG_Myb_CIS_dn', 'ATG_Myb_CIS_up',
+                 'ATG_Myc_CIS_dn', 'ATG_Myc_CIS_up', 'ATG_NFI_CIS_dn', 'ATG_NFI_CIS_up', 'ATG_NF_kB_CIS_dn',
+                 'ATG_NF_kB_CIS_up', 'ATG_NRF1_CIS_dn', 'ATG_NRF1_CIS_up', 'ATG_NRF2_ARE_CIS_dn',
+                 'ATG_NRF2_ARE_CIS_up', 'ATG_NURR1_TRANS_dn', 'ATG_NURR1_TRANS_up', 'ATG_Oct_MLP_CIS_dn',
+                 'ATG_Oct_MLP_CIS_up', 'ATG_PBREM_CIS_dn', 'ATG_PBREM_CIS_up', 'ATG_PPARa_TRANS_dn',
+                 'ATG_PPARa_TRANS_up', 'ATG_PPARd_TRANS_up', 'ATG_PPARg_TRANS_up', 'ATG_PPRE_CIS_dn',
+                 'ATG_PPRE_CIS_up', 'ATG_PXRE_CIS_dn', 'ATG_PXRE_CIS_up', 'ATG_PXR_TRANS_dn', 'ATG_PXR_TRANS_up',
+                 'ATG_Pax6_CIS_up', 'ATG_RARa_TRANS_dn', 'ATG_RARa_TRANS_up', 'ATG_RARb_TRANS_dn',
+                 'ATG_RARb_TRANS_up', 'ATG_RARg_TRANS_dn', 'ATG_RARg_TRANS_up', 'ATG_RORE_CIS_dn',
+                 'ATG_RORE_CIS_up', 'ATG_RORb_TRANS_dn', 'ATG_RORg_TRANS_dn', 'ATG_RORg_TRANS_up',
+                 'ATG_RXRa_TRANS_dn', 'ATG_RXRa_TRANS_up', 'ATG_RXRb_TRANS_dn', 'ATG_RXRb_TRANS_up',
+                 'ATG_SREBP_CIS_dn', 'ATG_SREBP_CIS_up', 'ATG_STAT3_CIS_dn', 'ATG_STAT3_CIS_up', 'ATG_Sox_CIS_dn',
+                 'ATG_Sox_CIS_up', 'ATG_Sp1_CIS_dn', 'ATG_Sp1_CIS_up', 'ATG_TAL_CIS_dn', 'ATG_TAL_CIS_up',
+                 'ATG_TA_CIS_dn', 'ATG_TA_CIS_up', 'ATG_TCF_b_cat_CIS_dn', 'ATG_TCF_b_cat_CIS_up',
+                 'ATG_TGFb_CIS_dn', 'ATG_TGFb_CIS_up', 'ATG_THRa1_TRANS_dn', 'ATG_THRa1_TRANS_up',
+                 'ATG_VDRE_CIS_dn', 'ATG_VDRE_CIS_up', 'ATG_VDR_TRANS_dn', 'ATG_VDR_TRANS_up',
+                 'ATG_XTT_Cytotoxicity_up', 'ATG_Xbp1_CIS_dn', 'ATG_Xbp1_CIS_up', 'ATG_p53_CIS_dn',
+                 'ATG_p53_CIS_up', 'BSK_3C_Eselectin_down', 'BSK_3C_HLADR_down', 'BSK_3C_ICAM1_down',
+                 'BSK_3C_IL8_down', 'BSK_3C_MCP1_down', 'BSK_3C_MIG_down', 'BSK_3C_Proliferation_down',
+                 'BSK_3C_SRB_down', 'BSK_3C_Thrombomodulin_down', 'BSK_3C_Thrombomodulin_up',
+                 'BSK_3C_TissueFactor_down', 'BSK_3C_TissueFactor_up', 'BSK_3C_VCAM1_down', 'BSK_3C_Vis_down',
+                 'BSK_3C_uPAR_down', 'BSK_4H_Eotaxin3_down', 'BSK_4H_MCP1_down', 'BSK_4H_Pselectin_down',
+                 'BSK_4H_Pselectin_up', 'BSK_4H_SRB_down', 'BSK_4H_VCAM1_down', 'BSK_4H_VEGFRII_down',
+                 'BSK_4H_uPAR_down', 'BSK_4H_uPAR_up', 'BSK_BE3C_HLADR_down', 'BSK_BE3C_IL1a_down',
+                 'BSK_BE3C_IP10_down', 'BSK_BE3C_MIG_down', 'BSK_BE3C_MMP1_down', 'BSK_BE3C_MMP1_up',
+                 'BSK_BE3C_PAI1_down', 'BSK_BE3C_SRB_down', 'BSK_BE3C_TGFb1_down', 'BSK_BE3C_tPA_down',
+                 'BSK_BE3C_uPAR_down', 'BSK_BE3C_uPAR_up', 'BSK_BE3C_uPA_down', 'BSK_CASM3C_HLADR_down',
+                 'BSK_CASM3C_IL6_down', 'BSK_CASM3C_IL6_up', 'BSK_CASM3C_IL8_down', 'BSK_CASM3C_LDLR_down',
+                 'BSK_CASM3C_LDLR_up', 'BSK_CASM3C_MCP1_down', 'BSK_CASM3C_MCP1_up', 'BSK_CASM3C_MCSF_down',
+                 'BSK_CASM3C_MCSF_up', 'BSK_CASM3C_MIG_down', 'BSK_CASM3C_Proliferation_down',
+                 'BSK_CASM3C_Proliferation_up', 'BSK_CASM3C_SAA_down', 'BSK_CASM3C_SAA_up', 'BSK_CASM3C_SRB_down',
+                 'BSK_CASM3C_Thrombomodulin_down', 'BSK_CASM3C_Thrombomodulin_up', 'BSK_CASM3C_TissueFactor_down',
+                 'BSK_CASM3C_VCAM1_down', 'BSK_CASM3C_VCAM1_up', 'BSK_CASM3C_uPAR_down', 'BSK_CASM3C_uPAR_up',
+                 'BSK_KF3CT_ICAM1_down', 'BSK_KF3CT_IL1a_down', 'BSK_KF3CT_IP10_down', 'BSK_KF3CT_IP10_up',
+                 'BSK_KF3CT_MCP1_down', 'BSK_KF3CT_MCP1_up', 'BSK_KF3CT_MMP9_down', 'BSK_KF3CT_SRB_down',
+                 'BSK_KF3CT_TGFb1_down', 'BSK_KF3CT_TIMP2_down', 'BSK_KF3CT_uPA_down', 'BSK_LPS_CD40_down',
+                 'BSK_LPS_Eselectin_down', 'BSK_LPS_Eselectin_up', 'BSK_LPS_IL1a_down', 'BSK_LPS_IL1a_up',
+                 'BSK_LPS_IL8_down', 'BSK_LPS_IL8_up', 'BSK_LPS_MCP1_down', 'BSK_LPS_MCSF_down',
+                 'BSK_LPS_PGE2_down', 'BSK_LPS_PGE2_up', 'BSK_LPS_SRB_down', 'BSK_LPS_TNFa_down',
+                 'BSK_LPS_TNFa_up', 'BSK_LPS_TissueFactor_down', 'BSK_LPS_TissueFactor_up', 'BSK_LPS_VCAM1_down',
+                 'BSK_SAg_CD38_down', 'BSK_SAg_CD40_down', 'BSK_SAg_CD69_down', 'BSK_SAg_Eselectin_down',
+                 'BSK_SAg_Eselectin_up', 'BSK_SAg_IL8_down', 'BSK_SAg_IL8_up', 'BSK_SAg_MCP1_down',
+                 'BSK_SAg_MIG_down', 'BSK_SAg_PBMCCytotoxicity_down', 'BSK_SAg_PBMCCytotoxicity_up',
+                 'BSK_SAg_Proliferation_down', 'BSK_SAg_SRB_down', 'BSK_hDFCGF_CollagenIII_down',
+                 'BSK_hDFCGF_EGFR_down', 'BSK_hDFCGF_EGFR_up', 'BSK_hDFCGF_IL8_down', 'BSK_hDFCGF_IP10_down',
+                 'BSK_hDFCGF_MCSF_down', 'BSK_hDFCGF_MIG_down', 'BSK_hDFCGF_MMP1_down', 'BSK_hDFCGF_MMP1_up',
+                 'BSK_hDFCGF_PAI1_down', 'BSK_hDFCGF_Proliferation_down', 'BSK_hDFCGF_SRB_down',
+                 'BSK_hDFCGF_TIMP1_down', 'BSK_hDFCGF_VCAM1_down', 'CEETOX_H295R_11DCORT_dn',
+                 'CEETOX_H295R_ANDR_dn', 'CEETOX_H295R_CORTISOL_dn', 'CEETOX_H295R_DOC_dn', 'CEETOX_H295R_DOC_up',
+                 'CEETOX_H295R_ESTRADIOL_dn', 'CEETOX_H295R_ESTRADIOL_up', 'CEETOX_H295R_ESTRONE_dn',
+                 'CEETOX_H295R_ESTRONE_up', 'CEETOX_H295R_OHPREG_up', 'CEETOX_H295R_OHPROG_dn',
+                 'CEETOX_H295R_OHPROG_up', 'CEETOX_H295R_PROG_up', 'CEETOX_H295R_TESTO_dn', 'CLD_ABCB1_48hr',
+                 'CLD_ABCG2_48hr', 'CLD_CYP1A1_24hr', 'CLD_CYP1A1_48hr', 'CLD_CYP1A1_6hr', 'CLD_CYP1A2_24hr',
+                 'CLD_CYP1A2_48hr', 'CLD_CYP1A2_6hr', 'CLD_CYP2B6_24hr', 'CLD_CYP2B6_48hr', 'CLD_CYP2B6_6hr',
+                 'CLD_CYP3A4_24hr', 'CLD_CYP3A4_48hr', 'CLD_CYP3A4_6hr', 'CLD_GSTA2_48hr', 'CLD_SULT2A_24hr',
+                 'CLD_SULT2A_48hr', 'CLD_UGT1A1_24hr', 'CLD_UGT1A1_48hr', 'NCCT_HEK293T_CellTiterGLO',
+                 'NCCT_QuantiLum_inhib_2_dn', 'NCCT_QuantiLum_inhib_dn', 'NCCT_TPO_AUR_dn', 'NCCT_TPO_GUA_dn',
+                 'NHEERL_ZF_144hpf_TERATOSCORE_up', 'NVS_ADME_hCYP19A1', 'NVS_ADME_hCYP1A1', 'NVS_ADME_hCYP1A2',
+                 'NVS_ADME_hCYP2A6', 'NVS_ADME_hCYP2B6', 'NVS_ADME_hCYP2C19', 'NVS_ADME_hCYP2C9',
+                 'NVS_ADME_hCYP2D6', 'NVS_ADME_hCYP3A4', 'NVS_ADME_hCYP4F12', 'NVS_ADME_rCYP2C12', 'NVS_ENZ_hAChE',
+                 'NVS_ENZ_hAMPKa1', 'NVS_ENZ_hAurA', 'NVS_ENZ_hBACE', 'NVS_ENZ_hCASP5', 'NVS_ENZ_hCK1D',
+                 'NVS_ENZ_hDUSP3', 'NVS_ENZ_hES', 'NVS_ENZ_hElastase', 'NVS_ENZ_hFGFR1', 'NVS_ENZ_hGSK3b',
+                 'NVS_ENZ_hMMP1', 'NVS_ENZ_hMMP13', 'NVS_ENZ_hMMP2', 'NVS_ENZ_hMMP3', 'NVS_ENZ_hMMP7',
+                 'NVS_ENZ_hMMP9', 'NVS_ENZ_hPDE10', 'NVS_ENZ_hPDE4A1', 'NVS_ENZ_hPDE5', 'NVS_ENZ_hPI3Ka',
+                 'NVS_ENZ_hPTEN', 'NVS_ENZ_hPTPN11', 'NVS_ENZ_hPTPN12', 'NVS_ENZ_hPTPN13', 'NVS_ENZ_hPTPN9',
+                 'NVS_ENZ_hPTPRC', 'NVS_ENZ_hSIRT1', 'NVS_ENZ_hSIRT2', 'NVS_ENZ_hTrkA', 'NVS_ENZ_hVEGFR2',
+                 'NVS_ENZ_oCOX1', 'NVS_ENZ_oCOX2', 'NVS_ENZ_rAChE', 'NVS_ENZ_rCNOS', 'NVS_ENZ_rMAOAC',
+                 'NVS_ENZ_rMAOAP', 'NVS_ENZ_rMAOBC', 'NVS_ENZ_rMAOBP', 'NVS_ENZ_rabI2C',
+                 'NVS_GPCR_bAdoR_NonSelective', 'NVS_GPCR_bDR_NonSelective', 'NVS_GPCR_g5HT4', 'NVS_GPCR_gH2',
+                 'NVS_GPCR_gLTB4', 'NVS_GPCR_gLTD4', 'NVS_GPCR_gMPeripheral_NonSelective', 'NVS_GPCR_gOpiateK',
+                 'NVS_GPCR_h5HT2A', 'NVS_GPCR_h5HT5A', 'NVS_GPCR_h5HT6', 'NVS_GPCR_h5HT7', 'NVS_GPCR_hAT1',
+                 'NVS_GPCR_hAdoRA1', 'NVS_GPCR_hAdoRA2a', 'NVS_GPCR_hAdra2A', 'NVS_GPCR_hAdra2C',
+                 'NVS_GPCR_hAdrb1', 'NVS_GPCR_hAdrb2', 'NVS_GPCR_hAdrb3', 'NVS_GPCR_hDRD1', 'NVS_GPCR_hDRD2s',
+                 'NVS_GPCR_hDRD4.4', 'NVS_GPCR_hH1', 'NVS_GPCR_hLTB4_BLT1', 'NVS_GPCR_hM1', 'NVS_GPCR_hM2',
+                 'NVS_GPCR_hM3', 'NVS_GPCR_hM4', 'NVS_GPCR_hNK2', 'NVS_GPCR_hOpiate_D1', 'NVS_GPCR_hOpiate_mu',
+                 'NVS_GPCR_hTXA2', 'NVS_GPCR_p5HT2C', 'NVS_GPCR_r5HT1_NonSelective', 'NVS_GPCR_r5HT_NonSelective',
+                 'NVS_GPCR_rAdra1B', 'NVS_GPCR_rAdra1_NonSelective', 'NVS_GPCR_rAdra2_NonSelective',
+                 'NVS_GPCR_rAdrb_NonSelective', 'NVS_GPCR_rNK1', 'NVS_GPCR_rNK3', 'NVS_GPCR_rOpiate_NonSelective',
+                 'NVS_GPCR_rOpiate_NonSelectiveNa', 'NVS_GPCR_rSST', 'NVS_GPCR_rTRH', 'NVS_GPCR_rV1',
+                 'NVS_GPCR_rabPAF', 'NVS_GPCR_rmAdra2B', 'NVS_IC_hKhERGCh', 'NVS_IC_rCaBTZCHL',
+                 'NVS_IC_rCaDHPRCh_L', 'NVS_IC_rNaCh_site2', 'NVS_LGIC_bGABARa1', 'NVS_LGIC_h5HT3',
+                 'NVS_LGIC_hNNR_NBungSens', 'NVS_LGIC_rGABAR_NonSelective', 'NVS_LGIC_rNNR_BungSens',
+                 'NVS_MP_hPBR', 'NVS_MP_rPBR', 'NVS_NR_bER', 'NVS_NR_bPR', 'NVS_NR_cAR', 'NVS_NR_hAR',
+                 'NVS_NR_hCAR_Antagonist', 'NVS_NR_hER', 'NVS_NR_hFXR_Agonist', 'NVS_NR_hFXR_Antagonist',
+                 'NVS_NR_hGR', 'NVS_NR_hPPARa', 'NVS_NR_hPPARg', 'NVS_NR_hPR', 'NVS_NR_hPXR',
+                 'NVS_NR_hRAR_Antagonist', 'NVS_NR_hRARa_Agonist', 'NVS_NR_hTRa_Antagonist', 'NVS_NR_mERa',
+                 'NVS_NR_rAR', 'NVS_NR_rMR', 'NVS_OR_gSIGMA_NonSelective', 'NVS_TR_gDAT', 'NVS_TR_hAdoT',
+                 'NVS_TR_hDAT', 'NVS_TR_hNET', 'NVS_TR_hSERT', 'NVS_TR_rNET', 'NVS_TR_rSERT', 'NVS_TR_rVMAT2',
+                 'OT_AR_ARELUC_AG_1440', 'OT_AR_ARSRC1_0480', 'OT_AR_ARSRC1_0960', 'OT_ER_ERaERa_0480',
+                 'OT_ER_ERaERa_1440', 'OT_ER_ERaERb_0480', 'OT_ER_ERaERb_1440', 'OT_ER_ERbERb_0480',
+                 'OT_ER_ERbERb_1440', 'OT_ERa_EREGFP_0120', 'OT_ERa_EREGFP_0480', 'OT_FXR_FXRSRC1_0480',
+                 'OT_FXR_FXRSRC1_1440', 'OT_NURR1_NURR1RXRa_0480', 'OT_NURR1_NURR1RXRa_1440',
+                 'TOX21_ARE_BLA_Agonist_ch1', 'TOX21_ARE_BLA_Agonist_ch2', 'TOX21_ARE_BLA_agonist_ratio',
+                 'TOX21_ARE_BLA_agonist_viability', 'TOX21_AR_BLA_Agonist_ch1', 'TOX21_AR_BLA_Agonist_ch2',
+                 'TOX21_AR_BLA_Agonist_ratio', 'TOX21_AR_BLA_Antagonist_ch1', 'TOX21_AR_BLA_Antagonist_ch2',
+                 'TOX21_AR_BLA_Antagonist_ratio', 'TOX21_AR_BLA_Antagonist_viability',
+                 'TOX21_AR_LUC_MDAKB2_Agonist', 'TOX21_AR_LUC_MDAKB2_Antagonist',
+                 'TOX21_AR_LUC_MDAKB2_Antagonist2', 'TOX21_AhR_LUC_Agonist', 'TOX21_Aromatase_Inhibition',
+                 'TOX21_AutoFluor_HEK293_Cell_blue', 'TOX21_AutoFluor_HEK293_Media_blue',
+                 'TOX21_AutoFluor_HEPG2_Cell_blue', 'TOX21_AutoFluor_HEPG2_Cell_green',
+                 'TOX21_AutoFluor_HEPG2_Media_blue', 'TOX21_AutoFluor_HEPG2_Media_green', 'TOX21_ELG1_LUC_Agonist',
+                 'TOX21_ERa_BLA_Agonist_ch1', 'TOX21_ERa_BLA_Agonist_ch2', 'TOX21_ERa_BLA_Agonist_ratio',
+                 'TOX21_ERa_BLA_Antagonist_ch1', 'TOX21_ERa_BLA_Antagonist_ch2', 'TOX21_ERa_BLA_Antagonist_ratio',
+                 'TOX21_ERa_BLA_Antagonist_viability', 'TOX21_ERa_LUC_BG1_Agonist', 'TOX21_ERa_LUC_BG1_Antagonist',
+                 'TOX21_ESRE_BLA_ch1', 'TOX21_ESRE_BLA_ch2', 'TOX21_ESRE_BLA_ratio', 'TOX21_ESRE_BLA_viability',
+                 'TOX21_FXR_BLA_Antagonist_ch1', 'TOX21_FXR_BLA_Antagonist_ch2', 'TOX21_FXR_BLA_agonist_ch2',
+                 'TOX21_FXR_BLA_agonist_ratio', 'TOX21_FXR_BLA_antagonist_ratio',
+                 'TOX21_FXR_BLA_antagonist_viability', 'TOX21_GR_BLA_Agonist_ch1', 'TOX21_GR_BLA_Agonist_ch2',
+                 'TOX21_GR_BLA_Agonist_ratio', 'TOX21_GR_BLA_Antagonist_ch2', 'TOX21_GR_BLA_Antagonist_ratio',
+                 'TOX21_GR_BLA_Antagonist_viability', 'TOX21_HSE_BLA_agonist_ch1', 'TOX21_HSE_BLA_agonist_ch2',
+                 'TOX21_HSE_BLA_agonist_ratio', 'TOX21_HSE_BLA_agonist_viability', 'TOX21_MMP_ratio_down',
+                 'TOX21_MMP_ratio_up', 'TOX21_MMP_viability', 'TOX21_NFkB_BLA_agonist_ch1',
+                 'TOX21_NFkB_BLA_agonist_ch2', 'TOX21_NFkB_BLA_agonist_ratio', 'TOX21_NFkB_BLA_agonist_viability',
+                 'TOX21_PPARd_BLA_Agonist_viability', 'TOX21_PPARd_BLA_Antagonist_ch1',
+                 'TOX21_PPARd_BLA_agonist_ch1', 'TOX21_PPARd_BLA_agonist_ch2', 'TOX21_PPARd_BLA_agonist_ratio',
+                 'TOX21_PPARd_BLA_antagonist_ratio', 'TOX21_PPARd_BLA_antagonist_viability',
+                 'TOX21_PPARg_BLA_Agonist_ch1', 'TOX21_PPARg_BLA_Agonist_ch2', 'TOX21_PPARg_BLA_Agonist_ratio',
+                 'TOX21_PPARg_BLA_Antagonist_ch1', 'TOX21_PPARg_BLA_antagonist_ratio',
+                 'TOX21_PPARg_BLA_antagonist_viability', 'TOX21_TR_LUC_GH3_Agonist', 'TOX21_TR_LUC_GH3_Antagonist',
+                 'TOX21_VDR_BLA_Agonist_viability', 'TOX21_VDR_BLA_Antagonist_ch1', 'TOX21_VDR_BLA_agonist_ch2',
+                 'TOX21_VDR_BLA_agonist_ratio', 'TOX21_VDR_BLA_antagonist_ratio',
+                 'TOX21_VDR_BLA_antagonist_viability', 'TOX21_p53_BLA_p1_ch1', 'TOX21_p53_BLA_p1_ch2',
+                 'TOX21_p53_BLA_p1_ratio', 'TOX21_p53_BLA_p1_viability', 'TOX21_p53_BLA_p2_ch1',
+                 'TOX21_p53_BLA_p2_ch2', 'TOX21_p53_BLA_p2_ratio', 'TOX21_p53_BLA_p2_viability',
+                 'TOX21_p53_BLA_p3_ch1', 'TOX21_p53_BLA_p3_ch2', 'TOX21_p53_BLA_p3_ratio',
+                 'TOX21_p53_BLA_p3_viability', 'TOX21_p53_BLA_p4_ch1', 'TOX21_p53_BLA_p4_ch2',
+                 'TOX21_p53_BLA_p4_ratio', 'TOX21_p53_BLA_p4_viability', 'TOX21_p53_BLA_p5_ch1',
+                 'TOX21_p53_BLA_p5_ch2', 'TOX21_p53_BLA_p5_ratio', 'TOX21_p53_BLA_p5_viability',
+                 'Tanguay_ZF_120hpf_AXIS_up', 'Tanguay_ZF_120hpf_ActivityScore', 'Tanguay_ZF_120hpf_BRAI_up',
+                 'Tanguay_ZF_120hpf_CFIN_up', 'Tanguay_ZF_120hpf_CIRC_up', 'Tanguay_ZF_120hpf_EYE_up',
+                 'Tanguay_ZF_120hpf_JAW_up', 'Tanguay_ZF_120hpf_MORT_up', 'Tanguay_ZF_120hpf_OTIC_up',
+                 'Tanguay_ZF_120hpf_PE_up', 'Tanguay_ZF_120hpf_PFIN_up', 'Tanguay_ZF_120hpf_PIG_up',
+                 'Tanguay_ZF_120hpf_SNOU_up', 'Tanguay_ZF_120hpf_SOMI_up', 'Tanguay_ZF_120hpf_SWIM_up',
+                 'Tanguay_ZF_120hpf_TRUN_up', 'Tanguay_ZF_120hpf_TR_up', 'Tanguay_ZF_120hpf_YSE_up']
 
 
 def model_args(args):
-    _other_args_name = ['dataset_root', 'dataset', 'seed', 'gpu', 'note', 'batch_size', 'epochs', 'loss', 'optim', 'k',
-                        'lr', 'lr_reduce_rate', 'lr_reduce_patience', 'early_stop_patience', 'verbose_patience']
+    _other_args_name = ['dataset_root', 'dataset', 'split', 'seed', 'gpu', 'note', 'batch_size', 'epochs', 'loss',
+                        'optim', 'k', 'lr', 'lr_reduce_rate', 'lr_reduce_patience', 'early_stop_patience',
+                        'verbose_patience', 'split_seed']
     model_args_dict = {}
     for k, v in args.__dict__.items():
         if k not in _other_args_name:
@@ -471,22 +560,20 @@ def model_args(args):
 
 
 def auto_dataset(args):
-    from dataset import BindingDBProMolInteactionDataset, LIT_PCBA
-
-    if args.dataset == 'bindingdb_c':
-        from trainer import TrainerBinaryClassification as Trainer
-        args.out_dim = 2
-        _dataset = BindingDBProMolInteactionDataset(args.dataset_root)
-    elif args.dataset in ['ALDH1', 'ESR1_ant', 'KAT2A', 'MAPK1', 'FEN1']:
-        from trainer import TrainerScreening as Trainer
-        args.out_dim = 2
-        _dataset = LIT_PCBA(args.dataset_root, target=args.dataset)
+    from dataset import Dataset
+    if args.dataset in ['drugbank_caster']:
+        _dataset = Dataset(args.dataset_root, dataset=args.dataset, split_seed=args.split_seed)
+        if args.loss in ['bce', 'bcel']:
+            from trainer import TrainerMolBinaryClassificationNANBCE as Trainer
+            args.out_dim = 1
     else:
         raise Exception('error dataset input')
     return args, _dataset, Trainer
 
 
 class GPUManager():
+    # copy from https://raw.githubusercontent.com/wnm1503303791/Multi_GPU_Runner/master/src/manager_torch.py
+
     def __init__(self, qargs=[]):
         self.qargs = qargs
         self.gpus = self.query_gpu(qargs)
@@ -587,7 +674,7 @@ def summarize_logs(logs_dir: pathlib.PosixPath, metrics: list):
         logs_pd = pd.DataFrame(logs).sort_values(metrics[0], ascending=False)
         logs_summary = []
         for note, df in logs_pd.groupby('note'):
-            d = {'id(note)': note, 'n_GLAM': len(df), 'dataset': df['dataset'].iloc[0],
+            d = {'id(note)': note, 'n_run': len(df), 'dataset': df['dataset'].iloc[0],
                  'config': df['config'].iloc[0]}
             for m in metrics:
                 array = df[m].astype(float)
@@ -629,7 +716,6 @@ def print_ongoing_info(logs_dir: pathlib.PosixPath):
 
 def auto_metrics(dataset: str):
     metrics = ['valauc', 'auc']
-    # if dataset.startswith('lit_'): metrics = ['valbedroc', 'bedroc']
     return metrics
 
 
@@ -656,11 +742,10 @@ if __name__ == '__main__':
     # dataset = 'bindingdb_c'
     # results = auto_summarize_logs(dataset, ongoing=True)
     # evaluate_best_configs(results, n_configs=3)
-    # from trainer import Inferencer
-    # inf = Inferencer(dataset, n_blend=3)
+    # from trainer import GLAMHelper
+    # inf = GLAMHelper(dataset, n_blend=3)
     # inf.blend_and_inference()
 
-    datasets = ['bindingdb_c', 'ADRB2', 'ALDH1', 'ESR1_ago', 'ESR1_ant', 'FEN1', 'GBA', 'IDH1',
-                'KAT2A', 'MAPK1', 'MTORC1', 'OPRK1', 'PKM2', 'PPARG', 'TP53', 'VDR']
+    datasets = ['drugbank_caster']
     for dataset in datasets:
         results = auto_summarize_logs(dataset, ongoing=True)
