@@ -62,7 +62,7 @@ All datasets can be download from these website:
 - BindingDB: https://github.com/lifanchen-simm/transformerCPI/blob/master/data/BindingDB.zip
 - DrugBank: https://github.com/kexinhuang12345/CASTER/blob/master/DDE/data/unsup_dataset.csv
 - MoleculeNet(ESOL, Lipophilicity, FreeSolv, BACE, BBBP, SIDER, Tox21, ToxCast): http://moleculenet.org/datasets-1
-
+- Perturbed dataset built from PhysProp: here ./physprop_perturb.csv
 
 ## Full structure of workplace
 If you have all the datasets and code ready, you should place these files in the following structure.
@@ -138,7 +138,7 @@ optional arguments:
 
 If you want to perform property-slightly-affected structural perturbation with GLAM:
 
-    python3 glam.py --dataset physprop_mutate
+    python3 glam.py --dataset physprop_perturb
     
 If you want to perform property-slightly-affected structural perturbation with your model, please feed your model and physprop dataset to TrainerMolRegression and use the pasp() function.
     
