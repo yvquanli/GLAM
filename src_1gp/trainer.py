@@ -21,7 +21,7 @@ from model import model_args
 from dataset import auto_dataset
 from utils import GPUManager
 from logger import auto_summarize_logs, config2cmd, read_logs
-from dataset import mutate_test, dataset_names
+from dataset import perturb_test, dataset_names
 
 torch.backends.cudnn.enabled = True
 
@@ -328,8 +328,8 @@ class TrainerMolRegression(Trainer):
 
     def pasp(self):
         for level in [1, 2, 3]:
-            self.log('Run model for mutated test level {}...'.format(level))
-            M, M_prime, Q, Q_prime = mutate_test(self.args.dataset, level)
+            self.log('Run model for perturbed test level {}...'.format(level))
+            M, M_prime, Q, Q_prime = perturb_test(self.args.dataset, level)
 
             self.test_dataloader = DataLoader(M, batch_size=32)
             self.valid_iterations(mode='test')
@@ -372,14 +372,14 @@ def _blend_and_inference(ids, configs, custom_dataset=None, log=print):
         outputs.append(output)
         log('inference done!', with_time=True)
     log('blend results: ')
-    if args.dataset in dataset_names["r"]:  # + ['physprop_mutate']:
+    if args.dataset in dataset_names["r"]:  # + ['physprop_perturb']:
         log(blend_regression(outputs))
     elif args.dataset in dataset_names["c"] + ['demo']:
         log(blend_binary_classification_mt(
             outputs, metrics_fn=binary_metrics_multi_target_nan))
     else:
         raise ValueError('unknown dataset')
-    if args.dataset in ['physprop_mutate']:
+    if args.dataset in ['physprop_perturb']:
         return blend_regression(outputs, return_pred=True)
     log('Done!', with_time=True)
 
@@ -449,8 +449,8 @@ class GLAMHelper():
 
     def pasp(self):
         for level in [1, 2, 3]:
-            self.log('Run solution for mutated test level {}...'.format(level))
-            M, M_prime, Q, Q_prime = mutate_test(self.dataset, level)
+            self.log('Run solution for perturbed test level {}...'.format(level))
+            M, M_prime, Q, Q_prime = perturb_test(self.dataset, level)
 
             P = self.blend_and_inference(custom_dataset=M)
             P_prime = self.blend_and_inference(custom_dataset=M_prime)  # P'
