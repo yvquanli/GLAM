@@ -8,7 +8,7 @@ import torch
 
 def auto_metrics(dataset: str):
     metrics = ['valauc', 'auc']
-    if dataset in dataset_names["r"] + ['physprop_mutate']:
+    if dataset in dataset_names["r"] + ['physprop_perturb']:
         metrics = ['valr2', 'r2']
     # if dataset.startswith('lit_'): metrics = ['valbedroc', 'bedroc']
     return metrics
