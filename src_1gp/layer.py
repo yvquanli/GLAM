@@ -281,4 +281,4 @@ def dot_and_global_pool5(mol_out, pro_out, mol_batch, pro_batch):
         item = torch.matmul(mol_out[mol_start:mol_end], pro_out[pro_start:pro_end].T)
         out[i] = torch.stack([item.max(), item.mean(), item.median(), item.min(), item.std()])
     return out
- 
+
