@@ -73,7 +73,7 @@ def read_logs(logs_dir: pathlib.PosixPath):
                 '\n', '').strip().split('|')
             # print(p, loss_info, test_info)  # for some inf set
             log = {'id': p.name}
-            if 'inf' in loss_info: continue
+            if 'inf' in loss_info or 'inf' in test_info or 'inf' in valid_info: continue
             log.update(eval(loss_info))
             log.update(eval(test_info))
             log.update(eval(valid_info))
