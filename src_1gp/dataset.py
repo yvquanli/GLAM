@@ -25,9 +25,9 @@ except:
     print('Please install rdkit for data processing')
 
 dataset_names = {
-    "r": ['esol', 'freesolv', 'lipophilicity', 'physprop_mutate'],
+    "r": ['esol', 'freesolv', 'lipophilicity', 'physprop_perturb'],
     "c": ['demo', 'bbbp', 'bace', 'sider', 'toxcast', 'toxcast', 'tox21'],
-    "a": ['esol', 'freesolv', 'lipophilicity', 'physprop_mutate', 'demo', 'bbbp', 'bace', 'sider', 'toxcast', 'toxcast', 'tox21'],
+    "a": ['esol', 'freesolv', 'lipophilicity', 'physprop_perturb', 'demo', 'bbbp', 'bace', 'sider', 'toxcast', 'toxcast', 'tox21'],
 }
 
 
@@ -45,9 +45,9 @@ def auto_dataset(args):
             args.out_dim = 1 * _dataset.num_tasks
         else:
             raise Exception('error loss input')
-    elif args.dataset in dataset_names["r"] + ['physprop_mutate']:
+    elif args.dataset in dataset_names["r"] + ['physprop_perturb']:
         from trainer import TrainerMolRegression as Trainer
-        if args.dataset == 'physprop_mutate':
+        if args.dataset == 'physprop_perturb':
             from dataset import PertubationDataset as Dataset
         _dataset = Dataset(args.dataset_root,
                            dataset=args.dataset, split_seed=args.split_seed)
@@ -201,13 +201,13 @@ class Dataset(InMemoryDataset):
             'freesolv': ['expt'],
             'lipophilicity': ['exp'],
             'hiv': ['HIV_active'],
-            'physprop_mutate': ['LogP'],
+            'physprop_perturb': ['LogP'],
         }
         return d[self.dataset]
 
 
 class PertubationDataset(Dataset):
-    def __init__(self, root, dataset='physprop_mutate', split='scaffold', split_seed=1234, transform=None,
+    def __init__(self, root, dataset='physprop_perturb', split='scaffold', split_seed=1234, transform=None,
                  pre_transform=None, pre_filter=None):
         self.dataset = dataset  # random / random_nan / scaffold
         self.split_seed = split_seed
@@ -231,7 +231,7 @@ class PertubationDataset(Dataset):
             if mol is None: return None
             x, edge_index, edge_attr = get_mol_nodes_edges(mol)
             label = target[i]
-            if self.dataset in ['physprop_mutate']:
+            if self.dataset in ['physprop_perturb']:
                 y = torch.FloatTensor(label).unsqueeze(0)
             data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr, smi=smi, y=y)
             data_list.append(data)
@@ -251,8 +251,8 @@ class PertubationDataset(Dataset):
             trn, val, test = torch.load(save_path)
             return trn, val, test
         df = pd.read_csv(self.raw_paths[0])
-        train_size = len(df[df['label'] == 'train'])
-        val_size = len(df[df['label'] == 'val'])
+        train_size = len(df[df['Label'] == 'train'])
+        val_size = len(df[df['Label'] == 'val'])
         trn, val, test = self[:train_size], self[train_size:train_size + val_size], self[train_size + val_size:]
         torch.save([trn, val, test], save_path)
         return trn, val, test
@@ -287,18 +287,18 @@ def randomize_smiles(smiles_list):
     smiles_list = [Chem.MolToSmiles(MolFromSmiles(x), doRandom=True) for x in smiles_list]
     return smiles_list
 
-def mutate_test(dataset, level, split=None, split_seed=None):
-    labels = {1: 'Mutation_level_1', 2: 'Mutation_level_2', 3: 'Mutation_level_3'}
+def perturb_test(dataset, level, split=None, split_seed=None):
+    labels = {1: 'SMILES_1', 2: 'SMILES_2', 3: 'SMILES_3'}
     save_root = Path('../../Dataset/GLAM-GP/')
 
-    print('Loading mutated dataset...')
+    print('Loading perturbed dataset...')
     df = pd.read_csv(save_root / 'raw/{}.csv'.format(dataset))
     col_name = labels[level]
-    test_total = df[df.label == 'test'][df[col_name].notna()]
-    mutated_smiles_list = test_total[col_name].to_list()
+    test_total = df[df.Label == 'test'] # [df[col_name].notna()]
+    perturbed_smiles_list = test_total[col_name].to_list()
     original_smiles_list = test_total['SMILES'].to_list()
     labels = test_total['LogP'].to_list()
-    # mutated_path = save_root / 'processed/mutated_{}_{}_{}.ckpt'.format(dataset, split_seed, level)
+    # perturbed_path = save_root / 'processed/perturbed_{}_{}_{}.ckpt'.format(dataset, split_seed, level)
 
     print('Processing test dataset level {}...'.format(level))
     # _, _, M = torch.load(str(save_root / 'processed/split_{}_{}_{}.ckpt'.format(split_seed, dataset, split)))
@@ -306,15 +306,15 @@ def mutate_test(dataset, level, split=None, split_seed=None):
     data_list1 = preprocss(original_smiles_list, labels)
     M = dataset_init(data_list1) # M, 
 
-    print('Processing mutated test dataset level {}...'.format(level))
+    print('Processing perturbed test dataset level {}...'.format(level))
     # _, _, M_prime = torch.load(str(save_root / 'processed/split_{}_{}_{}.ckpt'.format(split_seed, dataset, split)))
-    # mutated_smiles_list = randomize_smiles(mutated_smiles_list)
-    data_list2 = preprocss(mutated_smiles_list, labels)
+    # perturbed_smiles_list = randomize_smiles(perturbed_smiles_list)
+    data_list2 = preprocss(perturbed_smiles_list, labels)
     M_prime = dataset_init(data_list2) # M_prime,
 
-    print('mutations/total:{}/{}'.format(len(test_total), len(df[df.label == 'test'])))
+    print('perturbs/total:{}/{}'.format(len(test_total), len(df[df.Label == 'test'])))
     print('Perturbation done!')
-    Q = test_total['LogP rdkit']
-    Q_prime = test_total['LogP_level_{}'.format(level)]
+    Q = test_total['LogP']
+    Q_prime = test_total['LogP_{}'.format(level)]
     return M, M_prime, Q.to_numpy(), Q_prime.to_numpy()
 
