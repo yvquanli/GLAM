@@ -93,7 +93,7 @@ class GLAM():
             del config['k']
         if self.args.dataset in dataset_names["c"] + ['demo']:
             config['loss'] = choice(['bcel'])
-        elif self.args.dataset in dataset_names["r"] + ['physprop_mutate']:
+        elif self.args.dataset in dataset_names["r"] + ['physprop_perturb']:
             config['loss'] = choice(['mse', 'mse', 'mse', 'mae', 'huber'])
         config_id = md5(' '.join([k + ' ' + str(v)
                         for k, v in config.items()]))
@@ -105,7 +105,7 @@ class GLAM():
             top_n=self.args.n_top_blend, n_seed=self.args.n_high_fidelity_seed)
         self.log('Run solution for original test set...')
         self.glam_helper.blend_and_inference()
-        if self.args.dataset in ['physprop_mutate']:
+        if self.args.dataset in ['physprop_perturb']:
             self.glam_helper.pasp()
 
     def log(self, msg=None, with_time=False):
@@ -123,7 +123,7 @@ class GLAM():
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str,
-                        default='physprop_mutate', help='bindingdb_c,  lit_esr1ant')
+                        default='physprop_perturb', help='bindingdb_c,  lit_esr1ant')
     parser.add_argument('--dataset_root', type=str, default='../../Dataset/GLAM-GP', help='./demo')
 
     parser.add_argument('--n_init_configs', default=200,
@@ -139,7 +139,7 @@ if __name__ == '__main__':
     parser.add_argument('--split_seed', default=1234,
                         type=int, help='seed to split a dataset')
     args = parser.parse_args()
-    # args.dataset, args.n_init_configs, args.n_low_fidelity_seed, args.n_top_blend, args.n_high_fidelity_seed = 'physprop_mutate', 1, 1, 1, 1
+    # args.dataset, args.n_init_configs, args.n_low_fidelity_seed, args.n_top_blend, args.n_high_fidelity_seed = 'physprop_perturb', 1, 1, 1, 1
     solver = GLAM(args)
     solver.low_fidelity_training()
     solver.auto_blend()
