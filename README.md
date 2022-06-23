@@ -145,4 +145,4 @@ If you want to perform property-slightly-affected structural perturbation with y
 
 # Citation
 
-paper to be accept...
+Li, Y., Hsieh, CY., Lu, R. et al. An adaptive graph learning method for automated molecular interactions and properties predictions. Nat Mach Intell (2022). https://doi.org/10.1038/s42256-022-00501-8
