@@ -6,10 +6,6 @@ Code for "An adaptive graph learning method for automated molecular interactions
 ![version](https://img.shields.io/badge/version-v3.0.0-blue) 
 
 [![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/an-adaptive-graph-learning-method-for/drug-discovery-on-bindingdb)](https://paperswithcode.com/sota/drug-discovery-on-bindingdb?p=an-adaptive-graph-learning-method-for)
-[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/an-adaptive-graph-learning-method-for/drug-discovery-on-esol-scaffold)](https://paperswithcode.com/sota/drug-discovery-on-esol-scaffold?p=an-adaptive-graph-learning-method-for)
-[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/an-adaptive-graph-learning-method-for/drug-discovery-on-lit-pcba-kat2a)](https://paperswithcode.com/sota/drug-discovery-on-lit-pcba-kat2a?p=an-adaptive-graph-learning-method-for)
-[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/an-adaptive-graph-learning-method-for/drug-discovery-on-bbbp-scaffold)](https://paperswithcode.com/sota/drug-discovery-on-bbbp-scaffold?p=an-adaptive-graph-learning-method-for)
-
 
 
 ## Abstract
