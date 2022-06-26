@@ -60,4 +60,4 @@ model = Model(dataset.mol_num_node_features, dataset.mol_num_edge_features, **mo
 
 trainer = Trainer(args, model, train_dataset, valid_dataset, test_dataset)
 trainer.train_and_test()
-trainer.pasp()
+# trainer.pasp()
