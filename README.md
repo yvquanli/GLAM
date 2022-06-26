@@ -1,6 +1,13 @@
 # GLAM
 Code for "An adaptive graph learning method for automated molecular interactions and properties predictions".
 
+[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/an-adaptive-graph-learning-method-for/drug-discovery-on-bindingdb)](https://paperswithcode.com/sota/drug-discovery-on-bindingdb?p=an-adaptive-graph-learning-method-for)
+
+
+
+
+
+
 ## Abstract
 
 Improving drug discovery efficiency is a core and long-standing challenge in drug discovery. For this purpose, many graph learning methods have been developed to search potential drug candidates with fast speed and low cost. In fact, the pursuit of high prediction performance on a limited number of datasets has crystallized their architectures and hyperparameters, making them lose advantage in repurposing to new data generated in drug discovery. Here we propose a flexible method that can adapt to any dataset and make accurate predictions. The proposed method employs an adaptive pipeline to learn from a dataset and output a predictor. Without any manual intervention, the method achieves far better prediction performance on all tested datasets than traditional methods, which are based on hand-designed neural architectures and other fixed items. In addition, we found that the proposed method is more robust than traditional methods and can provide meaningful interpretability. Given the above, the proposed method can serve as a reliable method to predict molecular interactions and properties with high adaptability, performance, robustness and interpretability. This work would take a solid step forward to the purpose of aiding researchers to design better drugs with high efficiency.
