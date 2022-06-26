@@ -42,7 +42,7 @@ class Architecture(torch.nn.Module):
         _mol_ro = 5 if mol_readout == 'GlobalPool5' else 2
         self.mol_flat = LinearBlock(_mol_ro * hid_dim, e_dim, norm=flat_norm, dropout=flat_do, act=flat_act)
         self.lin_out1 = LinearBlock(e_dim, out_dim, norm=end_norm, dropout=end_do, act='_None')
-        init_weith_with_gain(self.modules())  # for pasp expr
+        # init_weith_with_gain(self.modules())  # for pasp expr
 
     def forward(self, data_mol):
         # pre linear
