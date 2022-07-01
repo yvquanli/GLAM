@@ -157,7 +157,7 @@ def random_scaffold_split(dataset, smiles_list, task_idx=None, null_value=0,
         scaffold = generate_scaffold(smiles, include_chirality=True)
         scaffolds[scaffold].append(ind)
 
-    scaffold_sets = rng.perperturb(list(scaffolds.values()))
+    scaffold_sets = rng.permutation(list(scaffolds.values()))
 
     n_total_valid = int(np.floor(frac_valid * len(dataset)))
     n_total_test = int(np.floor(frac_test * len(dataset)))
