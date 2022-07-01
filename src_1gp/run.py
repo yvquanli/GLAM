@@ -4,7 +4,7 @@ from dataset import Dataset, PertubationDataset, auto_dataset
 from utils import seed_torch
 from model import model_args
 
-import os; os.chdir(os.path.dirname(__file__))
+# import os; os.chdir(os.path.dirname(__file__))
 
 import warnings; warnings.filterwarnings('ignore')
 parser = argparse.ArgumentParser()
