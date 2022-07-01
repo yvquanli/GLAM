@@ -10,7 +10,7 @@ import warnings; warnings.filterwarnings('ignore')
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--dataset_root', default='../../Dataset/GLAM-GP', type=str, help='dataset root path')
-parser.add_argument('--dataset', type=str, default='physprop_perturb', help='bbbp, bace, sider')
+parser.add_argument('--dataset', type=str, default='esol', help='bbbp, bace, sider')
 parser.add_argument('--split', type=str, default='random', help='random, scaffold')
 parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--split_seed', type=int, default=1234)
