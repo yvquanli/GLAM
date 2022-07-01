@@ -123,7 +123,7 @@ class GLAM():
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str,
-                        default='physprop_perturb', help='bindingdb_c,  lit_esr1ant')
+                        default='esol', help='bindingdb_c,  lit_esr1ant')
     parser.add_argument('--dataset_root', type=str, default='../../Dataset/GLAM-GP', help='./demo')
 
     parser.add_argument('--n_init_configs', default=200,
