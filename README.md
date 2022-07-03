@@ -7,6 +7,7 @@ Code for "An adaptive graph learning method for automated molecular interactions
 
 [![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/an-adaptive-graph-learning-method-for/drug-discovery-on-bindingdb)](https://paperswithcode.com/sota/drug-discovery-on-bindingdb?p=an-adaptive-graph-learning-method-for)
 
+Access the paper by this sharedit link: ![https://rdcu.be/cQP0g](https://rdcu.be/cQP0g)
 
 ## Abstract
 
