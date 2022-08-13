@@ -5,8 +5,6 @@ Code for "An adaptive graph learning method for automated molecular interactions
 [![Paper](https://img.shields.io/badge/paper-Nature%20Machine%20Intelligence-green)](https://www.nature.com/articles/s42256-022-00501-8)
 ![version](https://img.shields.io/badge/version-v3.0.0-blue) 
 
-[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/an-adaptive-graph-learning-method-for/drug-discovery-on-bindingdb)](https://paperswithcode.com/sota/drug-discovery-on-bindingdb?p=an-adaptive-graph-learning-method-for)
-
 Access the paper by this sharedit link: https://rdcu.be/cQP0g
 
 ## Abstract
