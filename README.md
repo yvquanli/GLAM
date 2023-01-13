@@ -40,7 +40,7 @@ You can install the required dependencies with the following code.
 
 If you don't have a gpu or want a cpu version, you can try this:
     
-    conda create -n GLAM python=3.8 rdkit pytorch=1.10.0 cpuonly -c pytorch -c conda-forge --yes
+    conda create -n GLAM python rdkit pytorch=1.10.0 cpuonly -c pytorch -c conda-forge --yes
     conda activate GLAM
     CUDA=cpu
     TORCH=1.10.0
