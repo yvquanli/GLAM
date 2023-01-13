@@ -30,20 +30,20 @@ First You should choose the Anaconda version that suits your system and install 
 
 You can install the required dependencies with the following code. 
     
-    conda create -n GLAM python=3.8 rdkit pytorch=1.9.0 cudatoolkit=11.1 -c pytorch -c conda-forge --yes
+    conda create -n GLAM python rdkit pytorch=1.10.0 cudatoolkit=11.1 -c pytorch -c conda-forge --yes
     conda activate GLAM
     CUDA=cu111
-    TORCH=1.9.0
+    TORCH=1.10.0
     pip install torch-scatter -f https://pytorch-geometric.com/whl/torch-${TORCH}+${CUDA}.html 
     pip install torch-sparse -f https://pytorch-geometric.com/whl/torch-${TORCH}+${CUDA}.html 
     pip install torch-geometric==1.7.2 
 
 If you don't have a gpu or want a cpu version, you can try this:
     
-    conda create -n GLAM python=3.8 rdkit pytorch=1.9.0 cpuonly -c pytorch -c conda-forge --yes
+    conda create -n GLAM python=3.8 rdkit pytorch=1.10.0 cpuonly -c pytorch -c conda-forge --yes
     conda activate GLAM
     CUDA=cpu
-    TORCH=1.9.0
+    TORCH=1.10.0
     pip install torch-scatter -f https://pytorch-geometric.com/whl/torch-${TORCH}+${CUDA}.html 
     pip install torch-sparse -f https://pytorch-geometric.com/whl/torch-${TORCH}+${CUDA}.html 
     pip install torch-geometric==1.7.2 
