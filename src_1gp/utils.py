@@ -150,14 +150,17 @@ def random_scaffold_split(dataset, smiles_list, task_idx=None, null_value=0,
         non_null = np.ones(len(dataset)) == 1
         smiles_list = list(compress(enumerate(smiles_list), non_null))
 
-    rng = np.random.RandomState(seed)
+    
 
     scaffolds = defaultdict(list)
     for ind, smiles in smiles_list:
         scaffold = generate_scaffold(smiles, include_chirality=True)
         scaffolds[scaffold].append(ind)
 
-    scaffold_sets = rng.permutation(list(scaffolds.values()))
+    # rng = np.random.RandomState(seed)
+    # scaffold_sets = rng.permutation(list(scaffolds.values()))  new version of numpy will raise error
+    scaffold_sets = list(scaffolds.values())
+    np.random.shuffle(scaffold_sets)
 
     n_total_valid = int(np.floor(frac_valid * len(dataset)))
     n_total_test = int(np.floor(frac_test * len(dataset)))
