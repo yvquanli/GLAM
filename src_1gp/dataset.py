@@ -318,3 +318,8 @@ def perturb_test(dataset, level, split=None, split_seed=None):
     Q_prime = test_total['LogP_{}'.format(level)]
     return M, M_prime, Q.to_numpy(), Q_prime.to_numpy()
 
+if __name__ == '__main__':
+    import os; os.chdir(os.path.dirname(__file__)) 
+    # datdset = Dataset('../../Dataset/GLAM-GP')
+    datdset = Dataset(dataset='demo', root='../../Dataset/GLAM-GP')
+    a=3
