@@ -29,16 +29,14 @@ First You should choose the Anaconda version that suits your system and install 
     # sh Anaconda3-2021.04-MacOSX-x86_64.sh
 
 You can install the required dependencies with the following code. 
-
-    conda create -n GLAM python=3.8 rdkit -c conda-forge --yes
-    conda activate GLAM
-    conda install pytorch=1.9.0 cudatoolkit=11.1 -c pytorch -c conda-forge --yes
+    
+    conda create -n GLAM python=3.8 rdkit pytorch=1.9.0 cudatoolkit=11.1 -c pytorch -c conda-forge --yes
+    conda activate pyg_old
     CUDA=cu111
     TORCH=1.9.0
     pip install torch-scatter -f https://pytorch-geometric.com/whl/torch-${TORCH}+${CUDA}.html 
     pip install torch-sparse -f https://pytorch-geometric.com/whl/torch-${TORCH}+${CUDA}.html 
     pip install torch-geometric==1.7.2 
-    git clone https://github.com/yvquanli/GLAM.git
 
 If you don't have a gpu or want a cpu version, you can try this:
     
