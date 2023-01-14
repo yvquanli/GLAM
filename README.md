@@ -98,6 +98,7 @@ This is the guide for preparing the BindingDB and LIT-PCBA dataset:
     cd ~/Dataset/GLAM-DTI/raw/lit_pcba_raw
     wget http://drugdesign.unistra.fr/LIT-PCBA/Files/full_data.tgz
     tar zxvf full_data.tgz -C .
+    mv full_data/* .
     
 This is the guide for preparing the drug-drug interaction dataset:
 
