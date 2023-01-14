@@ -47,13 +47,13 @@ If you don't have a gpu or want a cpu version, you can try this:
     pip install torch-scatter -f https://pytorch-geometric.com/whl/torch-${TORCH}+${CUDA}.html 
     pip install torch-sparse -f https://pytorch-geometric.com/whl/torch-${TORCH}+${CUDA}.html 
     pip install torch-geometric==1.7.2 
-    git clone https://github.com/yvquanli/GLAM.git
 
 
 
 ## Demo
 If you have successfully completed the above steps, then you can use the following code to run a demo for a property prediction task.
 
+    git clone https://github.com/yvquanli/GLAM.git
     cd ./GLAM/src_1gp
     python3 demo.py
 
@@ -66,6 +66,47 @@ All datasets can be download from these website:
 - DrugBank: https://github.com/kexinhuang12345/CASTER/blob/master/DDE/data/unsup_dataset.csv
 - MoleculeNet(ESOL, Lipophilicity, FreeSolv, BACE, BBBP, SIDER, Tox21, ToxCast): http://moleculenet.org/datasets-1
 - Perturbed dataset built from PhysProp: here ./physprop_perturb.csv
+
+
+## Full preparing for all datasets
+If you want preparing the workplace for full runing of the code, you can try this guide. Firstly, you should clone the code:
+
+    cd ~
+    mkdir GLAM; cd GLAM
+    git clone https://github.com/yvquanli/GLAM.git    # clone the code to ~/GLAM/GLAM
+    
+This is the guide for preparing the MoleculeNet dataset:
+
+    cd ~
+    mkdir -p ~/Dataset/GLAM-GP/raw; cd "$_"
+    wget https://deepchemdata.s3-us-west-1.amazonaws.com/datasets/delaney-processed.csv   # for esol
+    mv delaney-processed.csv esol.csv
+    # We recommend that you download, rename, and drag it the ~/Dataset/GLAM-GP/raw directory mannualy.
+    # ...... (preparing other dataset as above)
+
+This is the guide for preparing the BindingDB and LIT-PCBA dataset:
+
+    cd ~
+    mkdir -p ~/Dataset/GLAM-DTI/raw; cd "$_"
+    mv ~/GLAM/GLAM/pro_contact_map.zip ./pro_contact_map.zip
+    unzip ./pro_contact_map.zip
+    
+    cd bindingdb
+    wget https://github.com/lifanchen-simm/transformerCPI/blob/master/data/BindingDB.zip   # for esol
+    unzip BindingDB.zip
+    
+    cd ~/Dataset/GLAM-DTI/raw/lit_pcba_raw
+    wget http://drugdesign.unistra.fr/LIT-PCBA/Files/full_data.tgz
+    tar zxvf full_data.tgz -C .
+    
+This is the guide for preparing the drug-drug interaction dataset:
+
+    mkdir -p ~/Dataset/GLAM-DDI/raw; cd "$_"
+    wget https://github.com/kexinhuang12345/CASTER/blob/master/DDE/data/unsup_dataset.csv
+    mv unsup_dataset.csv ddi_total.csv
+
+If you get any error with these guide, please up a issue, and we will refix it.
+    
 
 ## Full structure of workplace
 If you have all the datasets and code ready, you should place these files in the following structure.
