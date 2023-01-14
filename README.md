@@ -92,7 +92,7 @@ This is the guide for preparing the BindingDB and LIT-PCBA dataset:
     unzip ./pro_contact_map.zip
     
     cd bindingdb
-    wget https://github.com/lifanchen-simm/transformerCPI/blob/master/data/BindingDB.zip   # for esol
+    wget https://github.com/lifanchen-simm/transformerCPI/blob/master/data/BindingDB.zip 
     unzip BindingDB.zip
     
     cd ~/Dataset/GLAM-DTI/raw/lit_pcba_raw
